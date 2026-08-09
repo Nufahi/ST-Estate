@@ -87,6 +87,13 @@ function buildEntryCard(entry, index, onChange) {
     title.setAttribute('aria-label', t('entryTitle'));
 
     head.append(toggle, title);
+
+    // A scouted run reviews several buildings at once, and "Main hall" three
+    // times over says nothing about which one. The name of the place is what
+    // tells the rows apart, so it sits above each title.
+    const place = String(entry.origin?.place || '').trim();
+    if (place) head.appendChild(node('span', 'est-entry__place', place));
+
     element.appendChild(head);
 
     const body = node('div', 'est-entry__body');
@@ -165,6 +172,10 @@ function buildEntryCard(entry, index, onChange) {
             keys: recompile(),
             order: entry.order,
             depth: entry.depth,
+            // Carried rather than recomputed: one review can hold several
+            // buildings, and the badge on a row belongs to the place that row
+            // came from, not to whatever the run finished on.
+            origin: entry.origin,
         }),
     };
 }

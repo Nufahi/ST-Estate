@@ -349,7 +349,11 @@ export async function writeEntries(entries, options) {
         const entry = createWorldInfoEntry(name, data);
         if (!entry) continue;
 
-        entry.comment = decorateTitle(draft.title || 'Home', options.origin).slice(0, 120);
+        // An entry knows which building it describes when the run wrote several;
+        // the run's own origin is the fallback for the ordinary single-place case.
+        const origin = draft.origin || options.origin;
+
+        entry.comment = decorateTitle(draft.title || 'Home', origin).slice(0, 120);
         entry.content = composeContent(draft);
         entry.key = Array.isArray(draft.keys) ? draft.keys.filter(Boolean) : [];
         entry.keysecondary = [];
@@ -373,7 +377,7 @@ export async function writeEntries(entries, options) {
 
         entry.automationId = '';
         entry[`${STAMP}_created`] = new Date().toISOString();
-        entry[`${STAMP}_mode`] = options.origin?.mode === 'place' ? 'place' : 'home';
+        entry[`${STAMP}_mode`] = origin?.mode === 'place' ? 'place' : 'home';
         if (draft.room) entry[`${STAMP}_room`] = String(draft.room).slice(0, 60);
 
         written++;

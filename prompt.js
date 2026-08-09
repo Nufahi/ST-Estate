@@ -214,8 +214,13 @@ function buildOccupancy(ctx, settings, mode) {
     return { subject: charName, line: `This is the home of ${charName}.` };
 }
 
-/** Only the context the user asked for, trimmed to something sane. */
-function buildContext(ctx, settings, lore = '') {
+/**
+ * Only the context the user asked for, trimmed to something sane.
+ *
+ * Exported because the scout asks a different question of the same material,
+ * and assembling it twice is how the two would drift apart.
+ */
+export function buildContext(ctx, settings, lore = '') {
     const parts = [];
     const fields = ctx.getCharacterCardFields?.() || {};
 

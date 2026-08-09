@@ -10,6 +10,7 @@ import { button, card, checkbox, field, hint, input, node, segmented, select, te
 import { buildingIcon, houseIcon } from './icon.js';
 import { language, t } from './i18n.js';
 import { chatLorebook, listLorebooks } from './lorebook.js';
+import { openSuggestions } from './suggest.js';
 import {
     BINDINGS,
     COVER_ITEMS_MAX,
@@ -439,17 +440,10 @@ function buildOutputSection(settings, brief) {
     };
 }
 
-function setBusy(root, busy) {
-    root.classList.toggle('est-dialog--busy', busy);
-    const action = root.querySelector('.est-generate');
-    const stop = root.querySelector('.est-stop');
-    const status = root.querySelector('.est-status');
-    if (action) /** @type {HTMLButtonElement} */ (action).disabled = busy;
-    if (stop) /** @type {HTMLElement} */ (stop).hidden = !busy;
-    if (status) {
-        /** @type {HTMLElement} */ (status).hidden = !busy;
-        status.textContent = t('generating');
-    }
+/** `m:ss`, which is the only resolution a wait of this length deserves. */
+function formatElapsed(ms) {
+    const total = Math.max(0, Math.round(ms / 1000));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
 }
 
 /** True when at least one tag on the active board or some free text is present. */
@@ -508,11 +502,15 @@ function buildPlaceNameSection(brief) {
 /**
  * Open the Estate dialog.
  *
- * @param {(settings: object, brief: object, hooks: {status: (text: string) => void}) => Promise<boolean>} onGenerate
+ * @param {object} run
+ * @param {(settings: object, brief: object, places?: object[]) => Promise<boolean>} run.generate
  *        Resolves true when the flow finished and the dialog should close.
- * @param {() => boolean} onCancel
+ * @param {(settings: object, brief: object) => Promise<object[]|null>} run.suggest
+ * @param {() => boolean} run.cancel
+ * @param {(listener: (state: object) => void) => () => void} run.subscribe
+ *        Publishes the state of the run, which outlives this dialog.
  */
-export async function openDialog(onGenerate, onCancel) {
+export async function openDialog(run) {
     if (dialogOpen) return;
 
     const context = SillyTavern.getContext();
@@ -644,19 +642,47 @@ export async function openDialog(onGenerate, onCancel) {
     root.append(model.card, contextSection.card, output.card);
     applyMode();
 
+    // The progress block. A scouted run is one request per building and can
+    // take minutes, and a dialog that only says "writing…" is indistinguishable
+    // from one that has quietly died — hence the clock, the step counter and an
+    // explicit way out.
     const status = node('div', 'est-status');
     status.hidden = true;
     status.setAttribute('role', 'status');
     status.setAttribute('aria-live', 'polite');
 
+    const statusLine = node('div', 'est-status__line');
+    const spinner = node('i', 'fa-solid fa-spinner fa-spin est-status__spinner');
+    spinner.setAttribute('aria-hidden', 'true');
+    const statusText = node('span', 'est-status__text', t('generating'));
+    const clock = node('span', 'est-status__clock', '0:00');
+    statusLine.append(spinner, statusText, clock);
+
+    const statusStep = node('span', 'est-status__step');
+    const statusNote = node('p', 'est-status__note', t('backgroundHint'));
+    status.append(statusLine, statusStep, statusNote);
+
     const actions = node('div', 'est-actions');
     const stop = button(t('stop'), 'fa-solid fa-stop');
     stop.classList.add('est-stop');
     stop.hidden = true;
+    const background = button(t('background'), 'fa-solid fa-arrow-right-from-bracket');
+    background.classList.add('est-background');
+    background.title = t('backgroundTitle');
+    background.hidden = true;
+    const scout = button(t('scout'), 'fa-solid fa-binoculars');
+    scout.classList.add('est-scout');
+    scout.title = t('scoutTitle');
     const generate = button(t('generate'), 'fa-solid fa-wand-magic-sparkles');
     generate.classList.add('est-generate');
-    actions.append(stop, generate);
-    root.append(status, actions);
+    actions.append(stop, background, scout, generate);
+
+    // Status and buttons ride together at the bottom of the scroller. The
+    // board is long enough that a run started at the top would otherwise put
+    // both the clock and the way out of reach until you scrolled back down.
+    const footer = node('div', 'est-footer');
+    footer.append(status, actions);
+    root.append(footer);
 
     const popup = new context.Popup(root, context.POPUP_TYPE.TEXT, '', {
         wide: true,
@@ -664,21 +690,77 @@ export async function openDialog(onGenerate, onCancel) {
         allowVerticalScrolling: true,
         okButton: t('cancel'),
         cancelButton: false,
-        onClosing: () => !root.classList.contains('est-dialog--busy'),
     });
     popup.dlg?.setAttribute('aria-labelledby', heading.id);
 
-    stop.addEventListener('click', () => {
-        stop.disabled = true;
-        onCancel();
+    // ---- progress ---------------------------------------------------------
+
+    let ticking = null;
+    let live = true;
+    let state = { phase: 'idle', startedAt: 0, done: 0, total: 1, stage: '' };
+
+    const paint = () => {
+        const busy = state.phase !== 'idle';
+        const generating = state.phase === 'generating';
+
+        root.classList.toggle('est-dialog--busy', busy);
+        status.hidden = !busy;
+
+        // Generate and Stop take turns rather than sitting side by side: only
+        // one of them is ever the thing to press, and a greyed-out Generate
+        // next to a live Stop is just a button asking to be clicked at.
+        generate.hidden = busy;
+        generate.disabled = busy;
+        scout.hidden = busy;
+        scout.disabled = busy;
+        stop.hidden = !generating;
+        background.hidden = !generating;
+
+        if (!busy) return;
+
+        statusText.textContent = state.stage || t(generating ? 'generating' : 'reviewing');
+        clock.hidden = !generating;
+        clock.textContent = generating ? formatElapsed(Date.now() - state.startedAt) : '';
+
+        // A one-request run has no meaningful step count, so it gets no line.
+        const stepped = generating && state.total > 1;
+        statusStep.hidden = !stepped;
+        if (stepped) {
+            statusStep.textContent = t('generatingStep', {
+                n: Math.min(state.done + 1, state.total),
+                total: state.total,
+            });
+        }
+    };
+
+    const stopTicking = () => {
+        clearInterval(ticking);
+        ticking = null;
+    };
+
+    const unsubscribe = run.subscribe(next => {
+        state = next;
+        if (state.phase === 'generating' && !ticking) ticking = setInterval(paint, 1000);
+        if (state.phase !== 'generating') stopTicking();
+        // Reopening mid-run has to find the Stop button usable again.
+        if (state.phase === 'generating') stop.disabled = false;
+        paint();
     });
 
-    generate.addEventListener('click', async () => {
-        if (!hasBrief(brief, mode, extra.value, cover.read())) {
-            toastr.info(t(mode === 'place' ? 'toastNoSelectionPlace' : 'toastNoSelection'), t('title'));
-            return;
-        }
+    stop.addEventListener('click', () => {
+        stop.disabled = true;
+        run.cancel();
+    });
 
+    // Leaving is not cancelling. The run carries on, and the review popup
+    // appears on its own when the model is done.
+    background.addEventListener('click', () => {
+        toastr.info(t('toastBackground'), t('title'));
+        popup.complete(context.POPUP_RESULT.CANCELLED);
+    });
+
+    /** Save whatever the board is holding, before anything is sent. */
+    const commitBoard = () => {
         brief.extra = extra.value.trim();
         brief.cover = cover.read();
         brief.mode = mode;
@@ -688,33 +770,70 @@ export async function openDialog(onGenerate, onCancel) {
         output.read();
         saveSettings();
         saveBrief();
+    };
 
-        setBusy(root, true);
+    generate.addEventListener('click', async () => {
+        if (!hasBrief(brief, mode, extra.value, cover.read())) {
+            toastr.info(t(mode === 'place' ? 'toastNoSelectionPlace' : 'toastNoSelection'), t('title'));
+            return;
+        }
+
+        commitBoard();
         stop.disabled = false;
 
         let done = false;
         try {
-            done = await onGenerate(settings, brief, {
-                status: text => { status.textContent = text; },
-            });
+            done = await run.generate(settings, brief);
         } catch (error) {
             console.error('[Estate] generate', error);
             done = false;
-        } finally {
-            setBusy(root, false);
         }
 
-        if (done) popup.complete(context.POPUP_RESULT.AFFIRMATIVE);
+        // The dialog may already be gone: the run was sent to the background
+        // while it was in flight, and completing a closed popup throws.
+        if (done && live) popup.complete(context.POPUP_RESULT.AFFIRMATIVE);
+    });
+
+    // The scout needs no board at all: the whole point is that it reads the
+    // story and fills the board in for you.
+    scout.addEventListener('click', async () => {
+        commitBoard();
+        stop.disabled = false;
+
+        let places = null;
+        try {
+            places = await run.suggest(settings, brief);
+        } catch (error) {
+            console.error('[Estate] suggest', error);
+        }
+        if (!places?.length) return;
+
+        const chosen = await openSuggestions(places);
+        if (!chosen?.length) return;
+
+        let done = false;
+        try {
+            done = await run.generate(settings, brief, chosen);
+        } catch (error) {
+            console.error('[Estate] generate', error);
+            done = false;
+        }
+
+        if (done && live) popup.complete(context.POPUP_RESULT.AFFIRMATIVE);
     });
 
     // Switching chats swaps chatMetadata underneath us, and the board is
     // still holding the old chat's brief. Every later keystroke would be
     // written to a detached object — silently lost at best, and at worst
     // saved into the wrong chat. Closing is the honest answer.
+    //
+    // A run in flight is left alone: it took its own copy of the brief when it
+    // started, and closing the board it no longer reads would only look like a
+    // cancellation that never happened.
     const eventSource = context.eventSource;
     const chatChanged = context.eventTypes?.CHAT_CHANGED || context.event_types?.CHAT_CHANGED;
     const onChatChanged = () => {
-        if (root.classList.contains('est-dialog--busy')) return;
+        if (state.phase !== 'idle') return;
         toastr.info(t('toastChatChanged'), t('title'));
         popup.complete(context.POPUP_RESULT.CANCELLED);
     };
@@ -724,7 +843,10 @@ export async function openDialog(onGenerate, onCancel) {
     try {
         await popup.show();
     } finally {
+        live = false;
         dialogOpen = false;
+        stopTicking();
+        unsubscribe();
         try {
             if (eventSource && chatChanged) eventSource.removeListener?.(chatChanged, onChatChanged);
         } catch (error) {

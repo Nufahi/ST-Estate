@@ -11,6 +11,7 @@ import { buildRequest, extractJson, normalizeEntries } from './prompt.js';
 import { openPreview } from './preview.js';
 import { buildLorebookName, DEPTH, ORDER, readBoundLore, writeEntries } from './lorebook.js';
 import { defaultNameTemplate, defaultSectionState, getSettings, resolveProfileId, saveBrief, saveSettings } from './settings.js';
+import { buildSuggestRequest, normalizeSuggestions } from './suggest.js';
 import { mountUi, openDialog, unmountUi } from './ui.js';
 
 const EXT_PATH = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
@@ -30,6 +31,53 @@ let activeAbort = null;
 let activeUsesProfile = false;
 
 const warn = (scope, error) => console.warn(`[${TAG}] ${scope}`, error);
+
+/**
+ * State of the run in progress, published rather than handed to the dialog.
+ *
+ * Generation outlives the dialog: closing the window has to leave the request
+ * running, and reopening it has to find the run still there. That only works
+ * if the progress lives here and the dialog merely subscribes to it.
+ *
+ * `phase` separates the halves of a run. Waiting on the model is timed and can
+ * be stopped; the review popup that follows is neither, but it still holds the
+ * extension busy, so a second run cannot start behind it.
+ */
+const runState = {
+    phase: 'idle',
+    startedAt: 0,
+    done: 0,
+    total: 1,
+    stage: '',
+};
+
+/** @type {Set<(state: object) => void>} */
+const runListeners = new Set();
+
+function publish(patch = {}) {
+    Object.assign(runState, patch);
+    const snapshot = { ...runState };
+    for (const listener of [...runListeners]) {
+        try {
+            listener(snapshot);
+        } catch (error) {
+            warn('run listener', error);
+        }
+    }
+}
+
+/**
+ * Watch the current run. The listener is called immediately with the state as
+ * it stands, so a dialog opened mid-run shows the right thing at once.
+ *
+ * @param {(state: {phase: string, startedAt: number, done: number, total: number, stage: string}) => void} listener
+ * @returns {() => void} unsubscribe
+ */
+function subscribeRun(listener) {
+    runListeners.add(listener);
+    listener({ ...runState });
+    return () => runListeners.delete(listener);
+}
 
 /** Aborts and cancellations arrive under several names; treat them alike. */
 function isCancellation(error) {
@@ -108,14 +156,104 @@ function applyTiers(entries) {
 }
 
 /**
- * The whole flow behind the dialog's Generate button.
+ * The names a title must not carry. The badge already says whose place it is,
+ * and repeating it down every row is what crowded the lorebook list.
+ *
+ * Homes only: a building can legitimately be called "Anna's Rest", and
+ * stripping the name out of that leaves an entry titled "Rest".
+ */
+function ownerNames(ctx, job) {
+    if (job.mode === 'place') return [];
+    return [ctx.name2, ctx.name1].map(name => String(name || '').trim()).filter(Boolean);
+}
+
+/**
+ * One place: a request, and when the reply is unusable, one retry.
+ *
+ * @returns {Promise<{ok: true, entries: object[], keyless: number} | {ok: false, error: string}>}
+ */
+async function generatePass(ctx, job, profileId, options) {
+    const parseOptions = {
+        englishOnly: job.keyLanguage === 'en',
+        names: ownerNames(ctx, job),
+    };
+
+    let attempt = await runGeneration(ctx, job, profileId, options);
+    let parsed = extractJson(attempt.reply);
+    let normalized = parsed.ok ? normalizeEntries(parsed.value, parseOptions) : { ok: false, error: parsed.error };
+
+    // A reply can parse cleanly and still be useless: entries whose keyword
+    // list came back empty never fire once written. Worth another pass.
+    const repairReason = normalized.ok
+        ? (normalized.keyless ? `${normalized.keyless} entr(ies) came back with an empty "keys" array` : '')
+        : normalized.error;
+
+    if (repairReason) {
+        warn('pass unusable', repairReason);
+        publish({ stage: t(normalized.ok ? 'retryingKeys' : 'retrying') });
+        activeAbort.signal.throwIfAborted();
+
+        const retry = await runGeneration(ctx, job, profileId, { ...options, repair: repairReason });
+        const retryParsed = extractJson(retry.reply);
+        const retryNormalized = retryParsed.ok
+            ? normalizeEntries(retryParsed.value, parseOptions)
+            : { ok: false, error: retryParsed.error };
+
+        // Only take the retry when it is genuinely better: a second pass that
+        // parses but loses the keys again should not replace a first pass that
+        // at least had some.
+        if (retryNormalized.ok && (!normalized.ok || retryNormalized.keyless < normalized.keyless)) {
+            attempt = retry;
+            normalized = retryNormalized;
+        }
+    }
+
+    if (!normalized.ok) console.debug(`[${TAG}] raw reply:`, attempt.reply);
+    return normalized;
+}
+
+/**
+ * The list of places one run will write, in the order they are generated.
+ *
+ * An ordinary run is a list of one: whatever the board says. A scouted run is
+ * one job per building the user ticked, each carrying the tags the scout chose
+ * for it laid over the board's own picks.
+ *
+ * @param {object} settings
+ * @param {object} brief
+ * @param {object[]} [places] proposals from the scout
+ * @returns {object[]} jobs, each a flat settings-and-brief object
+ */
+function planJobs(settings, brief, places) {
+    // The stores are merged here rather than in prompt.js, so the split stays
+    // a storage concern and nothing downstream has to know there are two.
+    const base = { ...settings, ...brief };
+    if (!places?.length) return [base];
+
+    return places.map(place => ({
+        ...base,
+        mode: 'place',
+        placeName: place.name,
+        // The scout's picks win where it had an opinion; a section it left
+        // alone keeps whatever the board was already carrying.
+        picks: { ...base.picks, ...place.picks },
+    }));
+}
+
+/**
+ * The whole flow behind the dialog's Generate button, and behind the scout's
+ * "write these" button.
+ *
+ * Runs to completion whether or not the dialog is still open: the review step
+ * is a popup of its own, so a backgrounded run still ends with the user being
+ * asked what to keep.
  *
  * @param {object} settings global preferences
  * @param {object} brief the answers belonging to this chat
- * @param {{status: (text: string) => void}} hooks
+ * @param {object[]} [places] buildings from the scout, one request each
  * @returns {Promise<boolean>} true when entries were written
  */
-async function generateEstate(settings, brief, hooks) {
+async function generateEstate(settings, brief, places) {
     if (inFlight || is_send_press) {
         toastr.warning(t('toastBusy'), t('title'));
         return false;
@@ -132,27 +270,13 @@ async function generateEstate(settings, brief, hooks) {
     activeAbort = new AbortController();
     activeUsesProfile = !!profileId;
 
-    // The prompt builder wants one object. The stores are merged here rather
-    // than in prompt.js, so the split stays a storage concern and nothing
-    // downstream of it has to know there are two.
-    const request = { ...settings, ...brief };
+    const jobs = planJobs(settings, brief, places);
+    publish({ phase: 'generating', startedAt: Date.now(), done: 0, total: jobs.length, stage: '' });
 
     try {
-        // The names are handed to the parser so an owner the model wrote into a
-        // title can be taken back out: the badge says whose place it is, and
-        // saying it again on every row is what crowded the lorebook list.
-        //
-        // Homes only. A building can legitimately be called "Anna's Rest", and
-        // stripping the name out of that leaves an entry titled "Rest".
-        const parseOptions = {
-            englishOnly: settings.keyLanguage === 'en',
-            names: brief.mode === 'place'
-                ? []
-                : [ctx.name2, ctx.name1].map(name => String(name || '').trim()).filter(Boolean),
-        };
-
-        // Read once, before the first request, so the retry pass sees the same
-        // material and a mid-run lorebook edit cannot change the brief.
+        // Read once, before the first request, so every place and every retry
+        // sees the same material and a mid-run lorebook edit cannot change the
+        // brief halfway through.
         let lore = '';
         if (settings.useLore) {
             try {
@@ -162,65 +286,67 @@ async function generateEstate(settings, brief, hooks) {
             }
         }
 
-        let attempt = await runGeneration(ctx, request, profileId, { lore });
-        let parsed = extractJson(attempt.reply);
-        let normalized = parsed.ok ? normalizeEntries(parsed.value, parseOptions) : { ok: false, error: parsed.error };
+        const entries = [];
+        let keyless = 0;
+        let failures = 0;
+        let lastError = '';
 
-        // A reply can parse cleanly and still be useless: entries whose keyword
-        // list came back empty never fire once written. Worth another pass.
-        const repairReason = normalized.ok
-            ? (normalized.keyless ? `${normalized.keyless} entr(ies) came back with an empty "keys" array` : '')
-            : normalized.error;
-
-        if (repairReason) {
-            warn('first pass unusable', repairReason);
-            hooks.status(t(normalized.ok ? 'retryingKeys' : 'retrying'));
+        for (let index = 0; index < jobs.length; index++) {
             activeAbort.signal.throwIfAborted();
 
-            const retry = await runGeneration(ctx, request, profileId, { repair: repairReason, lore });
-            const retryParsed = extractJson(retry.reply);
-            const retryNormalized = retryParsed.ok
-                ? normalizeEntries(retryParsed.value, parseOptions)
-                : { ok: false, error: retryParsed.error };
+            const job = jobs[index];
+            // `stage` is cleared with the step: a retry notice left over from
+            // the previous place would otherwise sit there for the whole run.
+            publish({ done: index, stage: '' });
+            if (jobs.length > 1) publish({ stage: t('generatingPlace', { name: job.placeName }) });
 
-            // Only take the retry when it is genuinely better: a second pass
-            // that parses but loses the keys again should not replace a first
-            // pass that at least had some.
-            if (retryNormalized.ok && (!normalized.ok || retryNormalized.keyless < normalized.keyless)) {
-                attempt = retry;
-                normalized = retryNormalized;
+            const result = await generatePass(ctx, job, profileId, { lore });
+
+            if (!result.ok) {
+                // One bad place out of several is not worth throwing the rest
+                // away for: the buildings that did come back are still wanted.
+                failures++;
+                lastError = result.error;
+                warn(`place ${index + 1}/${jobs.length} unusable`, result.error);
+                continue;
             }
+
+            // The origin travels with the entry rather than with the run: one
+            // review can now hold three buildings, and each row has to know
+            // which of them it belongs to or every badge would say the last.
+            const origin = resolveOrigin(job);
+            for (const entry of applyTiers(result.entries)) entries.push({ ...entry, origin });
+            keyless += result.keyless;
         }
 
-        if (!normalized.ok) {
-            warn('unusable reply', normalized.error);
-            console.debug(`[${TAG}] raw reply:`, attempt.reply);
-            toastr.error(t('toastBadJson'), t('title'));
-            return false;
-        }
-
-        if (normalized.keyless) {
-            warn('entries without keywords', normalized.keyless);
-            toastr.warning(t('toastKeyless', { n: normalized.keyless }), t('title'));
-        }
-
-        const entries = applyTiers(normalized.entries);
         if (!entries.length) {
-            toastr.info(t('toastEmptyResult'), t('title'));
+            warn('no usable entries', lastError);
+            toastr.error(t(lastError ? 'toastBadJson' : 'toastEmptyResult'), t('title'));
             return false;
+        }
+
+        if (failures) toastr.warning(t('toastPlaceFailed', { n: failures, total: jobs.length }), t('title'));
+
+        if (keyless) {
+            warn('entries without keywords', keyless);
+            toastr.warning(t('toastKeyless', { n: keyless }), t('title'));
         }
 
         const isNew = brief.createNew || !brief.lorebookName;
         const book = isNew ? buildLorebookName(settings.nameTemplate) : brief.lorebookName;
-        const origin = resolveOrigin(brief);
+        const mode = jobs.length > 1 ? 'place' : resolveOrigin(jobs[0]).mode;
 
-        return await openPreview(entries, { book, isNew, mode: origin.mode }, async selected => {
+        // The model is done; what remains is the user reading the result. The
+        // Stop button has nothing left to stop from here on.
+        publish({ phase: 'review', stage: '' });
+
+        return await openPreview(entries, { book, isNew, mode }, async selected => {
             try {
                 const result = await writeEntries(selected, {
                     name: book,
                     create: isNew,
                     bind: settings.bind,
-                    origin,
+                    origin: resolveOrigin(jobs[0]),
                 });
 
                 toastr.success(t('toastWritten', { n: result.written, book: result.name }), t('title'));
@@ -259,6 +385,81 @@ async function generateEstate(settings, brief, hooks) {
         inFlight = false;
         activeAbort = null;
         activeUsesProfile = false;
+        publish({ phase: 'idle', stage: '', done: 0, total: 1 });
+    }
+}
+
+/**
+ * Ask the model which buildings this story needs. One short request, no
+ * lorebook writing: what comes back is a list the user ticks, and the ticked
+ * ones then go through `generateEstate` as ordinary runs.
+ *
+ * @param {object} settings
+ * @param {object} brief
+ * @returns {Promise<object[]|null>} proposals, or null when nothing came back
+ */
+async function suggestPlaces(settings, brief) {
+    if (inFlight || is_send_press) {
+        toastr.warning(t('toastBusy'), t('title'));
+        return null;
+    }
+
+    const ctx = SillyTavern.getContext();
+    const profileId = resolveProfileId(settings);
+    if (!profileId && ctx.mainApi !== 'openai') {
+        toastr.warning(t('toastNoApi'), t('title'));
+        return null;
+    }
+
+    inFlight = true;
+    activeAbort = new AbortController();
+    activeUsesProfile = !!profileId;
+
+    // An ordinary generating phase: one request, its own caption. Scouting is
+    // not a third kind of run, and giving it a phase of its own only made
+    // every place that reads one ask about two.
+    publish({ phase: 'generating', startedAt: Date.now(), done: 0, total: 1, stage: t('scouting') });
+
+    try {
+        let lore = '';
+        if (settings.useLore) {
+            try {
+                lore = await readBoundLore();
+            } catch (error) {
+                warn('lorebook context', error);
+            }
+        }
+
+        const job = { ...settings, ...brief };
+        const request = buildSuggestRequest(job, { lore, count: settings.suggestCount });
+        const reply = profileId
+            ? await generateViaProfile(ctx, profileId, request, activeAbort.signal)
+            : await generateViaMainApi(ctx, request);
+
+        const parsed = extractJson(reply);
+        const normalized = parsed.ok ? normalizeSuggestions(parsed.value) : { ok: false, error: parsed.error };
+
+        if (!normalized.ok) {
+            warn('scouting reply unusable', normalized.error);
+            console.debug(`[${TAG}] raw reply:`, reply);
+            toastr.error(t('toastNoPlacesFound'), t('title'));
+            return null;
+        }
+
+        return normalized.places;
+    } catch (error) {
+        if (isCancellation(error)) {
+            toastr.info(t('toastStopped'), t('title'));
+            return null;
+        }
+        warn('suggest', error);
+        toastr.error(t('toastFailed'), t('title'));
+        return null;
+    } finally {
+        inFlight = false;
+        activeAbort = null;
+        activeUsesProfile = false;
+        publish({ phase: 'idle', stage: '', done: 0, total: 1 });
     }
 }
 
@@ -381,7 +582,12 @@ function registerSlashCommand(open) {
 // ---------------------------------------------------------------------------
 
 jQuery(async () => {
-    const open = () => openDialog(generateEstate, cancelGeneration);
+    const open = () => openDialog({
+        generate: generateEstate,
+        suggest: suggestPlaces,
+        cancel: cancelGeneration,
+        subscribe: subscribeRun,
+    });
 
     mountUi(open);
     registerSlashCommand(open);

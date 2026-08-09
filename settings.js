@@ -61,6 +61,15 @@ export const DETAIL_WORDS = Object.freeze({ brief: 90, normal: 180, rich: 320 })
 export const DETAIL_WORD_LIMITS = Object.freeze({ min: 40, max: 900 });
 
 export const HISTORY_LIMITS = Object.freeze({ min: 0, max: 200 });
+
+/**
+ * How many buildings the scout may propose in one pass. Every one the user
+ * ticks becomes a request of its own, so the ceiling is a bill as much as a
+ * list length. Kept here with the other bounds rather than beside the scout:
+ * settings.js is what sanitises the number, and importing it back out of
+ * suggest.js would only be a cycle.
+ */
+export const SUGGEST_LIMITS = Object.freeze({ min: 3, max: 12 });
 export const NAME_MAX = 60;
 const INSTRUCTION_MAX = 4000;
 const EXTRA_MAX = 2000;
@@ -102,6 +111,7 @@ const DEFAULTS = Object.freeze({
     useLore: true,
     useHistory: false,
     historyCount: 20,
+    suggestCount: 6,
     instruction: DEFAULT_INSTRUCTION,
     customTags: {},
 });
@@ -292,6 +302,7 @@ export function getSettings() {
         useLore: typeof raw.useLore === 'boolean' ? raw.useLore : DEFAULTS.useLore,
         useHistory: typeof raw.useHistory === 'boolean' ? raw.useHistory : DEFAULTS.useHistory,
         historyCount: clampInt(raw.historyCount, HISTORY_LIMITS, DEFAULTS.historyCount),
+        suggestCount: clampInt(raw.suggestCount, SUGGEST_LIMITS, DEFAULTS.suggestCount),
         instruction: normalizeText(raw.instruction, INSTRUCTION_MAX, DEFAULT_INSTRUCTION),
     };
 

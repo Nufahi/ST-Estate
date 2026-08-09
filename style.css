@@ -463,6 +463,15 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
+}
+
+/* The status block and the buttons ride together at the bottom of the
+   scroller. A run started at the top of a board this long would otherwise put
+   both the clock and the way out of reach until you scrolled back down. */
+.est-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     position: sticky;
     bottom: 0;
     z-index: 2;
@@ -495,10 +504,117 @@
     font-size: 0.85em;
 }
 
+.est-status__line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.est-status__spinner {
+    opacity: 0.75;
+}
+
+.est-status__text {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Tabular figures, so a ticking clock does not shuffle the line beside it. */
+.est-status__clock {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    opacity: 0.85;
+}
+
+.est-status__step {
+    display: block;
+    margin-top: 4px;
+    opacity: 0.75;
+}
+
+.est-status__note {
+    margin: 6px 0 0;
+    font-size: 0.92em;
+    opacity: 0.65;
+}
+
+/* The board is inert while a run is on, but the status block and the buttons
+   beneath it have to stay live — that is where Stop and the way out are. */
 .est-dialog--busy .est-card,
+.est-dialog--busy .est-tabs,
 .est-preview--busy .est-entry {
     opacity: 0.55;
     pointer-events: none;
+}
+
+/* ============================================================
+ * THE SCOUT
+ * ============================================================ */
+.est-suggest {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    text-align: left;
+    color: var(--est-fg);
+}
+
+.est-suggest__list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.est-suggest__item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--est-border);
+    border-left: 3px solid var(--est-accent);
+    border-radius: 10px;
+    background: var(--est-surface);
+    cursor: pointer;
+    transition: opacity 0.14s ease, border-color 0.14s ease;
+}
+.est-suggest__item--off {
+    opacity: 0.45;
+    border-left-color: var(--est-border);
+}
+.est-suggest__item input[type="checkbox"] {
+    flex: 0 0 auto;
+    margin: 3px 0 0;
+}
+
+.est-suggest__body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+}
+
+.est-suggest__name {
+    font-weight: 600;
+}
+
+.est-suggest__why {
+    font-size: 0.85em;
+    color: var(--est-muted);
+}
+
+.est-suggest__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 2px;
+}
+
+.est-suggest__tag {
+    padding: 2px 8px;
+    border: 1px solid var(--est-border);
+    border-radius: 999px;
+    background: var(--est-surface-strong);
+    font-size: 0.76em;
+    color: var(--est-muted);
 }
 
 /* ============================================================
@@ -558,6 +674,18 @@
 .est-entry__title {
     flex: 1 1 auto;
     min-width: 0;
+    font-weight: 600;
+}
+
+/* Which building this row belongs to. A scouted run reviews several at once,
+   and "Main hall" three times over says nothing about which one. */
+.est-entry__place {
+    flex: 0 0 auto;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--est-accent-soft);
+    color: var(--est-accent);
+    font-size: 0.76em;
     font-weight: 600;
 }
 
@@ -804,7 +932,12 @@
     .est-foldbar__button,
     .estate-settings__row,
     .estate-settings__primary,
+    .est-suggest__item,
     .estate-settings__saved {
         transition: none;
+    }
+
+    .est-status__spinner {
+        animation: none;
     }
 }

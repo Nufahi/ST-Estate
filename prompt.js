@@ -289,6 +289,33 @@ export function buildRequest(settings, options = {}) {
         ? 'You are a set designer writing reference material for a roleplay. You describe the buildings a story passes through.'
         : 'You are a set designer writing reference material for a roleplay. You describe where people live.';
 
+    // Surface tags are the ones that read as a uniform: told "wood panelling"
+    // and "tile", a model panels every wall in the house and tiles every floor,
+    // and the result is a showroom rather than somewhere anyone lives. They are
+    // a vocabulary to distribute, and saying so is what allows a monochrome
+    // bathroom and a boarded hallway ceiling to come from the same brief.
+    const surfaceSections = ['walls', 'floors', 'ceiling', 'furniture', 'textiles', 'colour_use', 'fixtures']
+        .map(id => (mode === 'place' ? `venue_${id}` : id))
+        .filter(id => (settings.picks?.[id] || []).length);
+
+    const surfaceRule = surfaceSections.length ? [
+        'SURFACES, FURNITURE AND COLOUR',
+        '- The walls, floors, ceilings, furniture, fabrics and colour tags are a'
+        + ' palette of materials to spend across the place, not one specification'
+        + ' repeated in every room. Real homes are assembled over time and out of'
+        + ' whatever was affordable that year.',
+        '- Give different rooms different surfaces from the list: tile where a room'
+        + ' gets wet, boards where it does not, the good floor where guests are'
+        + ' received and the cheap one where they are not.',
+        '- Where two tags conflict, that is a boundary, not a mistake. Put them in'
+        + ' different rooms and let the change be visible in the doorway.',
+        '- Say where one surface stops and the next begins: the line the tiling'
+        + ' reaches, the strip of trim, the point the good flooring gave out.',
+        '- Name the material and its state, not just the material: what it is, how'
+        + ' worn, what colour it has gone, what it does underfoot or under a hand.',
+        '',
+    ] : [];
+
     const evidence = mode === 'place'
         ? '- The building is evidence of the people who use it: who built it, who maintains it, who has stopped bothering. Show wear where hands and feet actually go.'
         : '- The home is evidence of a person. Every choice should say something about who lives there — what they can afford, what they care about, what they have given up on.';
@@ -310,7 +337,10 @@ export function buildRequest(settings, options = {}) {
         '- "visual" is a comma-separated tag list for image generation: materials, surfaces, palette, light quality, the three or four objects that define the frame.',
         '- Always in English, even when the description is Russian. No sentences, only tags.',
         '- Example: "exposed red brick, black steel window frames, worn oak floor, brass floor lamp, low winter sun, dust in the light, olive velvet sofa".',
+        '- Include the surfaces of the room this entry is about — wall, floor and'
+        + ' ceiling material — not only the objects standing in it.',
         '',
+        ...surfaceRule,
         entryPlan,
         `Produce at most ${MAX_ENTRIES} entries. Between ${counts.min} and ${counts.max} keywords each.`,
         languageRule,

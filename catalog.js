@@ -161,6 +161,152 @@ export const LIGHT = Object.freeze([
     CHIP('dark', 'Near dark', 'Темнота', 'near darkness, only silhouettes and a single light source'),
 ]);
 
+/**
+ * How colour is used, which is a different question from which colours.
+ *
+ * Palette names the hues; this names the arrangement. "Earth tones" says
+ * nothing about whether the place is one quiet colour or nine loud ones
+ * fighting, and that distinction changes the room more than the hue does.
+ */
+export const COLOUR_USE = Object.freeze([
+    CHIP('col_single', 'One colour only', 'Один цвет', 'a single colour throughout, varied only by shade, texture and material'),
+    CHIP('col_accent', 'One accent', 'Один акцент', 'a restrained base with exactly one accent colour, used sparingly and on purpose'),
+    CHIP('col_twotone', 'Two-tone', 'Два цвета', 'two colours split by surface: one on the walls, another on the joinery and furniture'),
+    CHIP('col_blocked', 'Colour-blocked', 'Цветовые блоки', 'flat blocks of saturated colour, each wall or zone given its own'),
+    CHIP('col_riot', 'All the colours', 'Всё разноцветное', 'many colours at once and none dominant: patterned walls, coloured furniture, nothing coordinated with anything'),
+    CHIP('col_mismatch', 'Nothing matches', 'Ничего не сочетается', 'colours never chosen together — whatever was cheap, inherited or left over from something else'),
+    CHIP('col_perroom', 'A colour per room', 'В каждой комнате свой', 'every room committed to a different colour, so moving between them is a visible change'),
+    CHIP('col_natural', 'Only material colour', 'Только цвет материала', 'nothing painted anywhere: the colour is whatever the wood, stone, brick and metal already are'),
+    CHIP('col_contrast', 'Hard contrast', 'Резкий контраст', 'sharp light-against-dark contrast with no mid-tones'),
+    CHIP('col_faded', 'Faded', 'Всё выцвело', 'colour drained out of everything by sunlight and washing'),
+    CHIP('col_grimy', 'Dulled by dirt', 'Всё в копоти и пыли', 'colours dulled under a film of smoke, grease and dust rather than by age'),
+]);
+
+/** Walls — the largest surface in any room, and the one most often skipped. */
+export const WALLS = Object.freeze([
+    CHIP('wall_paint', 'Painted', 'Крашеные', 'plainly painted walls, roller marks where the second coat ran short'),
+    CHIP('wall_plaster', 'Bare plaster', 'Штукатурка', 'bare or lime-washed plaster with the trowel marks still in it'),
+    CHIP('wall_wallpaper', 'Wallpaper', 'Обои', 'patterned wallpaper'),
+    CHIP('wall_peeling', 'Wallpaper coming off', 'Обои отходят', 'wallpaper lifting at the seams, a paler rectangle where something used to hang'),
+    CHIP('wall_wood', 'Wood panelling', 'Дерево', 'wood panelling or boarded walls'),
+    CHIP('wall_brick', 'Bare brick', 'Кирпич', 'exposed brickwork, mortar and all'),
+    CHIP('wall_concrete', 'Concrete', 'Бетон', 'bare concrete with board marks and tie holes'),
+    CHIP('wall_stone', 'Stone', 'Камень', 'dressed stone walls'),
+    CHIP('wall_tile', 'Tiled', 'Плитка', 'tiled walls'),
+    CHIP('wall_textile', 'Fabric-hung', 'Ковры и ткань на стенах', 'fabric on the walls: hangings, tapestries or a rug nailed up'),
+    CHIP('wall_mirror', 'Mirrored', 'Зеркала', 'mirrored panels making the room read twice its size'),
+    CHIP('wall_metal', 'Metal', 'Металл', 'riveted or corrugated metal walls'),
+    CHIP('wall_mural', 'Painted scenes', 'Роспись', 'painted scenes or a mural somebody committed to'),
+    CHIP('wall_covered', 'Buried under things', 'Всё завешано', 'walls invisible under what hangs on them: pictures, notes, shelves, instruments, a rug'),
+    CHIP('wall_bare', 'Nothing hung', 'Голые стены', 'nothing on the walls at all, and the blankness is noticeable'),
+    CHIP('wall_damp', 'Damp', 'Сырость и плесень', 'damp stains and mould blooming in the corners'),
+]);
+
+/** Floors — heard before they are seen, and they say what a place costs. */
+export const FLOORS = Object.freeze([
+    CHIP('floor_parquet', 'Parquet', 'Паркет', 'parquet, its pattern lifting in places'),
+    CHIP('floor_board', 'Bare boards', 'Доски', 'wide bare floorboards that announce every step'),
+    CHIP('floor_laminate', 'Laminate', 'Ламинат', 'laminate pretending to be a wood it never was'),
+    CHIP('floor_tile', 'Tile', 'Плитка', 'tiled floor'),
+    CHIP('floor_stone', 'Stone flags', 'Каменные плиты', 'stone flags worn into a dip where people walk'),
+    CHIP('floor_concrete', 'Concrete', 'Бетон', 'bare concrete, sealed or simply left'),
+    CHIP('floor_lino', 'Linoleum', 'Линолеум', 'linoleum, curling at the edges and patched with tape'),
+    CHIP('floor_carpet', 'Fitted carpet', 'Ковролин', 'fitted carpet, flattened along the routes people take'),
+    CHIP('floor_rugs', 'Layered rugs', 'Ковры', 'rugs layered over each other, edges rucked up'),
+    CHIP('floor_tatami', 'Tatami', 'Татами', 'tatami mats, shoes left at the edge'),
+    CHIP('floor_earth', 'Earth', 'Земляной', 'a beaten earth floor'),
+    CHIP('floor_grate', 'Metal grating', 'Решётчатый настил', 'metal grating with whatever is underneath visible through it'),
+    CHIP('floor_heated', 'Warm underfoot', 'Тёплый пол', 'floor warm underfoot, which is where the money went'),
+    CHIP('floor_cold', 'Cold underfoot', 'Холодный пол', 'a floor cold enough that nobody crosses it barefoot'),
+]);
+
+/** Ceilings — the surface nobody thinks to describe and everybody notices. */
+export const CEILING = Object.freeze([
+    CHIP('ceil_plain', 'Plain', 'Ровный белый', 'a plain white ceiling nobody looks at'),
+    CHIP('ceil_beams', 'Beams', 'Балки', 'exposed beams'),
+    CHIP('ceil_wood', 'Boarded in wood', 'Дерево', 'a wooden boarded ceiling'),
+    CHIP('ceil_stucco', 'Mouldings', 'Лепнина', 'plaster mouldings and a ceiling rose'),
+    CHIP('ceil_vault', 'Vaulted', 'Своды', 'a vaulted ceiling carrying the sound'),
+    CHIP('ceil_high', 'Very high', 'Высокий', 'ceilings high enough that the top of the room is in shadow'),
+    CHIP('ceil_low', 'Low', 'Низкий', 'ceilings low enough that a tall person keeps checking'),
+    CHIP('ceil_sloped', 'Sloped', 'Скошенный', 'a sloping ceiling following the roof, standing room only down the middle'),
+    CHIP('ceil_pipes', 'Pipes and cables', 'Трубы и провода', 'services left exposed overhead: ducts, pipework, cable trays'),
+    CHIP('ceil_stretch', 'Stretch ceiling', 'Натяжной потолок', 'a glossy stretch ceiling installed the year everyone did'),
+    CHIP('ceil_painted', 'Painted', 'Роспись', 'a painted ceiling that expects to be looked at'),
+    CHIP('ceil_stained', 'Water-stained', 'Разводы от воды', 'brown water stains spreading from somewhere above'),
+    CHIP('ceil_glass', 'Glazed', 'Стеклянный', 'a glazed roof overhead'),
+    CHIP('ceil_open', 'Open to the roof', 'Открыт до кровли', 'no ceiling at all — open to the underside of the roof'),
+]);
+
+/**
+ * The furniture itself: not the style it belongs to but the shape and origin
+ * of the objects. Whether a sofa is round and deep or square and hard is the
+ * difference between two rooms a style tag would describe identically.
+ */
+export const FURNITURE = Object.freeze([
+    CHIP('furn_soft', 'Soft and rounded', 'Мягкая, округлая', 'soft rounded furniture: deep upholstery, curved arms, no hard edge anywhere, everything made to be sunk into'),
+    CHIP('furn_angular', 'Angular', 'Угловатая', 'angular furniture: square arms, straight backs, hard edges, nothing you would fall asleep in by accident'),
+    CHIP('furn_low', 'Low', 'Низкая', 'everything low: floor cushions, a table at knee height, nothing to sit on that stands more than a foot up'),
+    CHIP('furn_massive', 'Massive', 'Массивная', 'heavy solid-wood furniture that has not been moved in years and would take two people to try'),
+    CHIP('furn_slight', 'Light and movable', 'Лёгкая', 'light furniture on thin legs, moved around the room depending on the day'),
+    CHIP('furn_builtin', 'Built in', 'Встроенная', 'built-in joinery: storage that is part of the wall, doors flush enough to miss'),
+    CHIP('furn_folding', 'Folds away', 'Складная', 'furniture that folds, stacks or converts, because there is no room for it to stay out'),
+    CHIP('furn_inherited', 'Inherited', 'Досталась по наследству', 'inherited pieces older than the person using them, kept for reasons other than taste'),
+    CHIP('furn_flatpack', 'Flatpack', 'Дешёвая, из ДСП', 'flatpack furniture: chipboard, cam locks, assembled once and slightly out of true ever since'),
+    CHIP('furn_handmade', 'Homemade', 'Самодельная', 'furniture somebody made themselves out of what was to hand, and it shows'),
+    CHIP('furn_salvaged', 'Salvaged', 'Подобранная', 'furniture taken off the street or out of a skip, cleaned up enough to use'),
+    CHIP('furn_mismatched', 'Nothing bought as a set', 'Всё разное, не гарнитур', 'not one matching pair: every piece from a different place and a different decade'),
+    CHIP('furn_designer', 'Designer', 'Дизайнерская', 'recognisable designer pieces, bought new and insured'),
+    CHIP('furn_sparse', 'Almost none', 'Почти пусто', 'barely any furniture — the room reads as empty and echoes'),
+    CHIP('furn_crammed', 'Too much for the room', 'Всё заставлено', 'more furniture than the room has floor, everything pushed against everything else'),
+    CHIP('furn_leather', 'Leather', 'Кожа', 'leather upholstery, cracked and warm where it is sat on'),
+    CHIP('furn_wicker', 'Wicker', 'Плетёная', 'wicker and rattan that creaks under weight'),
+    CHIP('furn_metal', 'Metal frames', 'Металлические', 'tube or angle-iron frames, bolted rather than joined'),
+    CHIP('furn_glass', 'Glass tops', 'Стекло', 'glass tabletops permanently marked with rings'),
+    CHIP('furn_carved', 'Carved', 'Резная', 'carved wood: fronts, legs and backs worked by hand'),
+]);
+
+/** Soft furnishings — what a room sounds like as much as what it looks like. */
+export const TEXTILES = Object.freeze([
+    CHIP('tex_heavy', 'Heavy curtains', 'Тяжёлые шторы', 'heavy lined curtains that hold the room dark past morning'),
+    CHIP('tex_sheer', 'Sheer curtains', 'Тюль', 'sheer curtains turning the daylight flat and even'),
+    CHIP('tex_blinds', 'Blinds', 'Жалюзи', 'blinds, usually left at whatever angle they were last set to'),
+    CHIP('tex_shutters', 'Shutters', 'Ставни', 'shutters, closed against the heat or the street'),
+    CHIP('tex_nowindow', 'Nothing on the windows', 'Окна ничем не закрыты', 'nothing on the windows at all, by choice or because it never got done'),
+    CHIP('tex_velvet', 'Velvet', 'Бархат', 'velvet, worn shiny in the places hands rest'),
+    CHIP('tex_linen', 'Linen', 'Лён', 'washed linen, creased and never ironed'),
+    CHIP('tex_wool', 'Wool', 'Шерсть', 'wool throws and blankets, one over the back of everything'),
+    CHIP('tex_knit', 'Knitted covers', 'Вязаные накидки', 'knitted and crocheted covers on the furniture, made by somebody who is named when asked'),
+    CHIP('tex_embroidered', 'Embroidered', 'Вышивка', 'embroidered cloth: cushions, runners, edges of things'),
+    CHIP('tex_synthetic', 'Cheap synthetics', 'Синтетика', 'cheap synthetics, shiny and full of static'),
+    CHIP('tex_patched', 'Patched and darned', 'Заштопано', 'fabric patched and darned rather than replaced'),
+    CHIP('tex_covers', 'Kept under covers', 'Мебель под чехлами', 'furniture kept under covers and uncovered only for guests'),
+    CHIP('tex_cushions', 'Cushions everywhere', 'Много подушек', 'cushions on everything, in numbers that have to be moved before sitting'),
+    CHIP('tex_none', 'Almost no fabric', 'Ткани почти нет', 'hard surfaces everywhere and nothing soft to absorb the sound'),
+    CHIP('tex_animal', 'Hides and furs', 'Шкуры', 'hides and furs on the floor and the seats'),
+]);
+
+/**
+ * What the light physically comes out of. LIGHT says what the light is like;
+ * this says what is hanging from the ceiling, and it is the one object in a
+ * room an image prompt can always place.
+ */
+export const FIXTURES = Object.freeze([
+    CHIP('fix_bulb', 'Bare bulb', 'Голая лампочка', 'a bare bulb on a flex, no shade, shadows thrown hard up the walls'),
+    CHIP('fix_chandelier', 'Chandelier', 'Люстра', 'a chandelier, more of it than the room can really carry'),
+    CHIP('fix_pendant', 'Pendants', 'Подвесные лампы', 'pendant lamps hung low over the surfaces that matter'),
+    CHIP('fix_shaded', 'Table and floor lamps', 'Лампы и торшеры', 'table and floor lamps only, the ceiling light never switched on'),
+    CHIP('fix_sconce', 'Wall sconces', 'Бра', 'wall sconces throwing light up onto the ceiling'),
+    CHIP('fix_strip', 'Strip lighting', 'Лампы-трубки на потолке', 'strip lights fixed to the ceiling, one of them always failing'),
+    CHIP('fix_led', 'Hidden LED', 'Скрытая подсветка', 'hidden LED strips in coves and under shelves, the source never visible'),
+    CHIP('fix_task', 'Work lights', 'Рабочий свет', 'clamp and task lights aimed at whatever is being worked on'),
+    CHIP('fix_string', 'String lights', 'Гирлянда', 'string lights left up long past whatever they were hung for'),
+    CHIP('fix_candles', 'Candles and lanterns', 'Свечи и лампы', 'candles, oil lamps and lanterns — nothing electric'),
+    CHIP('fix_fire', 'Firelight', 'Огонь', 'the fire is the light: hearth or stove, and whatever it does not reach stays dark'),
+    CHIP('fix_screens', 'Screens', 'Экраны', 'screens are the light source: monitors, panels, indicator LEDs'),
+    CHIP('fix_none', 'No fixed lighting', 'Света нет', 'no working light fitting at all — a torch, a phone, the window'),
+]);
+
 /** Rooms — what to actually describe. */
 export const ROOMS = Object.freeze([
     CHIP('entry', 'Entryway', 'Прихожая', 'entryway'),
@@ -203,7 +349,7 @@ export const FEATURES = Object.freeze([
     CHIP('server', 'Server rack', 'Стойка с серверами', 'a humming server rack'),
     CHIP('lab', 'Lab bench', 'Самодельная лаборатория', 'improvised laboratory equipment'),
     CHIP('greenhouse', 'Greenhouse', 'Оранжерея', 'an attached greenhouse'),
-    CHIP('bar', 'Home bar', 'Бар', 'a stocked home bar'),
+    CHIP('bar', 'Home bar', 'Домашний бар', 'a stocked home bar'),
     CHIP('gym', 'Home gym', 'Спортивный уголок', 'home training equipment'),
     CHIP('nosleep', 'No proper bed', 'Нормальной кровати нет', 'no proper bed — a mattress, sofa or bedroll instead'),
     CHIP('hidden', 'Hidden space', 'Тайная комната', 'a concealed room or cache'),
@@ -318,7 +464,9 @@ export const VENUE_FEATURES = Object.freeze([
     CHIP('bells', 'Bells', 'Колокола', 'bells that mark the hours'),
     CHIP('organ', 'Organ', 'Орган', 'a pipe organ'),
     CHIP('stainedglass', 'Stained glass', 'Витражи', 'stained glass windows'),
-    CHIP('vaults', 'Vaulted ceiling', 'Своды', 'a high vaulted ceiling'),
+    // Vaulting used to live here because the places board had no ceiling
+    // section. It has one now, and offering the same choice twice on one board
+    // only invites picking it twice and spending two of the caps on it.
     CHIP('columns', 'Columns', 'Колонны', 'a colonnade of stone columns'),
     CHIP('frescoes', 'Frescoes', 'Фрески', 'frescoes or murals on the walls'),
     CHIP('statue', 'Statue', 'Статуя', 'a statue that dominates the space'),
@@ -352,7 +500,14 @@ export const HOME_SECTIONS = Object.freeze([
     Object.freeze({ id: 'condition', en: 'Condition', ru: 'Состояние', chips: CONDITION, multi: false }),
     Object.freeze({ id: 'era', en: 'Era', ru: 'Эпоха', chips: ERA, multi: false }),
     Object.freeze({ id: 'palette', en: 'Palette', ru: 'Палитра', chips: PALETTE, multi: true, max: 2 }),
+    Object.freeze({ id: 'colour_use', en: 'How colour is used', ru: 'Как использован цвет', chips: COLOUR_USE, multi: true, max: 2 }),
     Object.freeze({ id: 'light', en: 'Light', ru: 'Свет', chips: LIGHT, multi: true, max: 2 }),
+    Object.freeze({ id: 'fixtures', en: 'Light fittings', ru: 'Светильники', chips: FIXTURES, multi: true, max: 3 }),
+    Object.freeze({ id: 'walls', en: 'Walls', ru: 'Стены', chips: WALLS, multi: true, max: 3 }),
+    Object.freeze({ id: 'floors', en: 'Floors', ru: 'Полы', chips: FLOORS, multi: true, max: 3 }),
+    Object.freeze({ id: 'ceiling', en: 'Ceiling', ru: 'Потолок', chips: CEILING, multi: true, max: 3 }),
+    Object.freeze({ id: 'furniture', en: 'Furniture', ru: 'Мебель', chips: FURNITURE, multi: true, max: 4 }),
+    Object.freeze({ id: 'textiles', en: 'Fabrics & windows', ru: 'Ткани и окна', chips: TEXTILES, multi: true, max: 4 }),
     Object.freeze({ id: 'rooms', en: 'Rooms to cover', ru: 'Что описать', chips: ROOMS, multi: true, max: 8 }),
     Object.freeze({ id: 'features', en: 'Signature features', ru: 'Особенности', chips: FEATURES, multi: true, max: 8 }),
 ]);
@@ -371,7 +526,14 @@ export const PLACE_SECTIONS = Object.freeze([
     Object.freeze({ id: 'venue_condition', en: 'Condition', ru: 'Состояние', chips: CONDITION, multi: false }),
     Object.freeze({ id: 'venue_era', en: 'Era', ru: 'Эпоха', chips: ERA, multi: false }),
     Object.freeze({ id: 'venue_palette', en: 'Palette', ru: 'Палитра', chips: PALETTE, multi: true, max: 2 }),
+    Object.freeze({ id: 'venue_colour_use', en: 'How colour is used', ru: 'Как использован цвет', chips: COLOUR_USE, multi: true, max: 2 }),
     Object.freeze({ id: 'venue_light', en: 'Light', ru: 'Свет', chips: LIGHT, multi: true, max: 2 }),
+    Object.freeze({ id: 'venue_fixtures', en: 'Light fittings', ru: 'Светильники', chips: FIXTURES, multi: true, max: 3 }),
+    Object.freeze({ id: 'venue_walls', en: 'Walls', ru: 'Стены', chips: WALLS, multi: true, max: 3 }),
+    Object.freeze({ id: 'venue_floors', en: 'Floors', ru: 'Полы', chips: FLOORS, multi: true, max: 3 }),
+    Object.freeze({ id: 'venue_ceiling', en: 'Ceiling', ru: 'Потолок', chips: CEILING, multi: true, max: 3 }),
+    Object.freeze({ id: 'venue_furniture', en: 'Furniture', ru: 'Мебель', chips: FURNITURE, multi: true, max: 4 }),
+    Object.freeze({ id: 'venue_textiles', en: 'Fabrics & windows', ru: 'Ткани и окна', chips: TEXTILES, multi: true, max: 4 }),
     Object.freeze({ id: 'zones', en: 'Zones to cover', ru: 'Что описать', chips: ZONES, multi: true, max: 8 }),
     Object.freeze({ id: 'venue_features', en: 'Signature features', ru: 'Особенности', chips: VENUE_FEATURES, multi: true, max: 8 }),
 ]);

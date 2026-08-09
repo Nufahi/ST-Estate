@@ -9,7 +9,7 @@ import { paintIcons } from './icon.js';
 import { t } from './i18n.js';
 import { buildRequest, extractJson, normalizeEntries } from './prompt.js';
 import { openPreview } from './preview.js';
-import { buildLorebookName, DEPTH, ORDER, writeEntries } from './lorebook.js';
+import { buildLorebookName, DEPTH, ORDER, readBoundLore, writeEntries } from './lorebook.js';
 import { defaultNameTemplate, getSettings, resolveProfileId, saveSettings } from './settings.js';
 import { mountUi, openDialog, unmountUi } from './ui.js';
 
@@ -137,18 +137,45 @@ async function generateEstate(settings, hooks) {
     try {
         const parseOptions = { englishOnly: settings.keyLanguage === 'en' };
 
-        let attempt = await runGeneration(ctx, settings, profileId, {});
+        // Read once, before the first request, so the retry pass sees the same
+        // material and a mid-run lorebook edit cannot change the brief.
+        let lore = '';
+        if (settings.useLore) {
+            try {
+                lore = await readBoundLore();
+            } catch (error) {
+                warn('lorebook context', error);
+            }
+        }
+
+        let attempt = await runGeneration(ctx, settings, profileId, { lore });
         let parsed = extractJson(attempt.reply);
         let normalized = parsed.ok ? normalizeEntries(parsed.value, parseOptions) : { ok: false, error: parsed.error };
 
-        // One repair pass: the error text goes back to the model verbatim.
-        if (!normalized.ok) {
-            warn('first pass unusable', normalized.error);
-            hooks.status(t('retrying'));
+        // A reply can parse cleanly and still be useless: entries whose keyword
+        // list came back empty never fire once written. Worth another pass.
+        const repairReason = normalized.ok
+            ? (normalized.keyless ? `${normalized.keyless} entr(ies) came back with an empty "keys" array` : '')
+            : normalized.error;
+
+        if (repairReason) {
+            warn('first pass unusable', repairReason);
+            hooks.status(t(normalized.ok ? 'retryingKeys' : 'retrying'));
             activeAbort.signal.throwIfAborted();
-            attempt = await runGeneration(ctx, settings, profileId, { repair: normalized.error });
-            parsed = extractJson(attempt.reply);
-            normalized = parsed.ok ? normalizeEntries(parsed.value, parseOptions) : { ok: false, error: parsed.error };
+
+            const retry = await runGeneration(ctx, settings, profileId, { repair: repairReason, lore });
+            const retryParsed = extractJson(retry.reply);
+            const retryNormalized = retryParsed.ok
+                ? normalizeEntries(retryParsed.value, parseOptions)
+                : { ok: false, error: retryParsed.error };
+
+            // Only take the retry when it is genuinely better: a second pass
+            // that parses but loses the keys again should not replace a first
+            // pass that at least had some.
+            if (retryNormalized.ok && (!normalized.ok || retryNormalized.keyless < normalized.keyless)) {
+                attempt = retry;
+                normalized = retryNormalized;
+            }
         }
 
         if (!normalized.ok) {
@@ -156,6 +183,11 @@ async function generateEstate(settings, hooks) {
             console.debug(`[${TAG}] raw reply:`, attempt.reply);
             toastr.error(t('toastBadJson'), t('title'));
             return false;
+        }
+
+        if (normalized.keyless) {
+            warn('entries without keywords', normalized.keyless);
+            toastr.warning(t('toastKeyless', { n: normalized.keyless }), t('title'));
         }
 
         const entries = applyTiers(normalized.entries);

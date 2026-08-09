@@ -240,8 +240,9 @@ function buildContextSection(settings) {
 
     const card_ = checkbox('estate_ctx_card', t('ctxCard'), settings.useCard);
     const persona = checkbox('estate_ctx_persona', t('ctxPersona'), settings.usePersona);
+    const lore = checkbox('estate_ctx_lore', t('ctxLore'), settings.useLore);
     const history = checkbox('estate_ctx_history', t('ctxHistory'), settings.useHistory);
-    grid.append(card_.row, persona.row, history.row);
+    grid.append(card_.row, persona.row, lore.row, history.row);
 
     const count = input('number', {
         min: HISTORY_LIMITS.min,
@@ -256,12 +257,13 @@ function buildContextSection(settings) {
     history.input.addEventListener('change', syncHistory);
     syncHistory();
 
-    body.append(grid, countField);
+    body.append(grid, hint(t('ctxLoreHint')), countField);
     return {
         card: element,
         read() {
             settings.useCard = card_.input.checked;
             settings.usePersona = persona.input.checked;
+            settings.useLore = lore.input.checked;
             settings.useHistory = history.input.checked;
             settings.historyCount = clampInt(count.value, HISTORY_LIMITS, settings.historyCount);
         },

@@ -23,6 +23,10 @@ keyword patterns that actually fire.
 - **Correct keyword patterns.** Russian keywords get Cyrillic lookaround
   patterns, English ones get `\b` boundaries, and the extension builds them —
   the model never writes a regex.
+- **Reads the lore you already have.** The lorebooks bound to the chat and to
+  the character card are fed in as reference, so a new place fits the world
+  instead of contradicting it. Estate's own entries are skipped, so later runs
+  are not copies of the first.
 - **Review before writing.** Nothing reaches the lorebook until you have seen
   the entries, unchecked what you do not want, and edited the rest.
 - **A separate model.** Route generation through any saved connection profile,
@@ -95,6 +99,10 @@ current chat, which leaves the character's own lorebooks untouched. You can
 instead pick an existing lorebook, or bind a new one to the character card or
 the active persona.
 
+Binding to the card never overwrites a lorebook the character already has. If
+the card carries one, Estate's book is attached alongside it as an auxiliary
+book — the same list the Character Lore panel shows.
+
 ## Settings
 
 Under **Extensions → Estate**:
@@ -114,7 +122,7 @@ Everything else lives in the dialog and is remembered between runs.
 | Saving | `saveWorldInfo(name, data, true)` |
 | Creation | `createNewWorldInfo` + `updateWorldInfoList` |
 | Chat binding | `chat_metadata.world_info` + `saveMetadata()` |
-| Card binding | `writeExtensionField(id, 'world', name)` |
+| Card binding | `writeExtensionField(id, 'world', name)`, or `world_info.charLore` when the card already has a book |
 | Persona binding | `power_user.persona_description_lorebook` |
 | Generation | `generateRaw()` / `ConnectionManagerRequestService.sendRequest()` |
 | Cancellation | `AbortController` + `stopGeneration()` |
@@ -126,8 +134,13 @@ Everything else lives in the dialog and is remembered between runs.
 - A malformed reply is retried once, with the parser's own error handed back
   to the model. Truncated replies are salvaged down to the last complete entry
   rather than discarded.
-- Locations beyond the home — churches, town halls, taverns — are the next
-  step, and will reuse this same engine.
+- `keys` is requested before `content` in the schema, and the token budget is
+  sized for the keyword arrays as well as the prose. Both exist because the
+  description is long enough to exhaust the reply on chattier models, and
+  whatever follows it is what gets cut — which used to be the keywords.
+- An entry that comes back with no keywords triggers a second pass, and is
+  flagged in the review dialog if it is still keyless. Such an entry would sit
+  in the lorebook and never fire.
 
 ## License
 

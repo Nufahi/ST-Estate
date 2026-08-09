@@ -11,8 +11,25 @@ import { promptsFor } from './catalog.js';
 import { customLabels, targetWords } from './settings.js';
 
 const MAX_ENTRIES = 12;
-/** Bilingual keying doubles the list, so the cap has to allow for both scripts. */
+
+/**
+ * Keyword counts per entry. These are deliberately modest: every key is a
+ * small JSON object, and asking for two dozen of them pushes the reply past
+ * the token budget, at which point the tail — the keys themselves — is what
+ * gets cut off. Bilingual keying doubles the list, so it gets the larger cap.
+ */
+const KEY_COUNTS = Object.freeze({
+    both: { min: 6, max: 14 },
+    en: { min: 4, max: 8 },
+});
+
+/** Absolute ceiling used when normalising a reply, whatever was asked for. */
 const MAX_KEYS_PER_ENTRY = 24;
+
+/** Rough token cost of one key spec object, used only to size the reply. */
+const TOKENS_PER_KEY = 24;
+/** Token cost of the title, room and visual fields plus JSON punctuation. */
+const TOKENS_PER_ENTRY_OVERHEAD = 120;
 
 /**
  * Reply contract handed to the model verbatim. The key examples follow the
@@ -38,17 +55,21 @@ function schema(bilingual) {
     }
     keys.push('        { "mode": "proper", "value": "Crimson Bar" }');
 
+    // Field order is load-bearing. `content` is by far the longest field, and a
+    // reply that runs out of tokens is cut from the end — so anything after the
+    // prose is what gets lost. Keys come first: an entry without them can never
+    // fire, which makes them the one field that must survive truncation.
     return [
         '{',
         '  "entries": [',
         '    {',
         '      "title": "short entry title, 2-5 words",',
         '      "room": "which room, zone or aspect this entry covers, or \\"whole\\" for the entire place",',
-        '      "content": "the description itself",',
-        '      "visual": "comma-separated visual tags: materials, colours, light, notable objects",',
         '      "keys": [',
         ...keys,
-        '      ]',
+        '      ],',
+        '      "visual": "comma-separated visual tags: materials, colours, light, notable objects",',
+        '      "content": "the description itself"',
         '    }',
         '  ]',
         '}',
@@ -98,7 +119,10 @@ entries in the list:
 This is not optional and it is the mistake that gets made most often: a list
 containing only English keywords is a failed reply. Roughly half of your
 keywords must be Russian. Russian stems follow the same rule — give the root
-without its ending: "кухн", not "кухня"; "кварти", not "квартира".`;
+without its ending: "кухн", not "кухня"; "кварти", not "квартира".
+
+Pick the few concepts that genuinely identify this place and key on those.
+A short, accurate list beats a long one.`;
 
 function clean(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -142,7 +166,7 @@ function buildOccupancy(ctx, settings, mode) {
 }
 
 /** Only the context the user asked for, trimmed to something sane. */
-function buildContext(ctx, settings) {
+function buildContext(ctx, settings, lore = '') {
     const parts = [];
     const fields = ctx.getCharacterCardFields?.() || {};
 
@@ -151,6 +175,13 @@ function buildContext(ctx, settings) {
     }
     if (settings.usePersona && fields.persona) {
         parts.push(`PERSONA\n${clean(fields.persona).slice(0, 2000)}`);
+    }
+    if (settings.useLore && lore) {
+        parts.push(
+            'ESTABLISHED LORE\nThis is what the world already says. Stay consistent with it: '
+            + 'reuse its places, names and materials rather than inventing rivals to them.\n'
+            + lore.slice(0, 6000),
+        );
     }
     if (settings.useHistory && settings.historyCount > 0) {
         const visible = (ctx.chat || [])
@@ -167,18 +198,20 @@ function buildContext(ctx, settings) {
  * Build the full request for one generation.
  *
  * @param {object} settings
- * @param {{repair?: string}} [options] `repair` carries the parser error back
- *        to the model on the retry pass.
+ * @param {{repair?: string, lore?: string}} [options] `repair` carries the
+ *        parser error back to the model on the retry pass; `lore` is the text
+ *        of the bound lorebooks, read by the caller because that is async.
  * @returns {{prompt: Array<{role: string, content: string}>, responseLength: number, mode: 'home'|'place', bilingual: boolean}}
  */
 export function buildRequest(settings, options = {}) {
     const ctx = SillyTavern.getContext();
     const mode = settings.mode === 'place' ? 'place' : 'home';
     const bilingual = settings.keyLanguage !== 'en';
+    const counts = bilingual ? KEY_COUNTS.both : KEY_COUNTS.en;
     const words = targetWords(settings);
     const occupancy = buildOccupancy(ctx, settings, mode);
     const brief = buildBrief(settings, mode);
-    const context = buildContext(ctx, settings);
+    const context = buildContext(ctx, settings, options.lore);
 
     const splitId = SPLIT_SECTION[mode];
     const perRoom = settings.granularity === 'rooms';
@@ -220,7 +253,7 @@ export function buildRequest(settings, options = {}) {
         '- Example: "exposed red brick, black steel window frames, worn oak floor, brass floor lamp, low winter sun, dust in the light, olive velvet sofa".',
         '',
         entryPlan,
-        `Produce at most ${MAX_ENTRIES} entries. Between ${bilingual ? 8 : 4} and ${bilingual ? MAX_KEYS_PER_ENTRY : 16} keywords each.`,
+        `Produce at most ${MAX_ENTRIES} entries. Between ${counts.min} and ${counts.max} keywords each.`,
         languageRule,
         '',
         KEY_RULES,
@@ -229,6 +262,9 @@ export function buildRequest(settings, options = {}) {
         '',
         'OUTPUT',
         'Reply with a single JSON object and nothing else. No prose before or after, no markdown fences.',
+        'Write the fields in the order shown. "keys" comes before "content": an',
+        'entry with no keywords can never fire, so it is the field that must not',
+        'be the one you run out of room for.',
         schema(bilingual),
     ].join('\n');
 
@@ -249,13 +285,22 @@ export function buildRequest(settings, options = {}) {
 
     if (options.repair) {
         userParts.push(
-            `Your previous reply could not be parsed: ${options.repair}\n`
-            + 'Reply again with the JSON object only. No fences, no commentary, all strings properly escaped.',
+            `Your previous reply was rejected: ${options.repair}\n`
+            + 'Reply again with the JSON object only. No fences, no commentary, all strings properly escaped. '
+            + `Every entry needs its "keys" array filled in, ${counts.min} keywords at the very least, `
+            + 'written before "content" so it cannot be the part that gets cut short.',
         );
     }
 
     const entryCount = perRoom && parts.length ? Math.min(parts.length + 1, MAX_ENTRIES) : 1;
-    const responseLength = Math.min(16384, Math.max(1024, Math.ceil(words * entryCount * 2.6) + 512));
+
+    // The budget has to cover the keyword arrays, not just the prose. Sizing it
+    // on word count alone is what left talkative models truncated mid-reply,
+    // with the keys — the last field written — missing entirely.
+    const proseTokens = Math.ceil(words * 2.6);
+    const keyTokens = counts.max * TOKENS_PER_KEY;
+    const perEntry = proseTokens + keyTokens + TOKENS_PER_ENTRY_OVERHEAD;
+    const responseLength = Math.min(32768, Math.max(1536, perEntry * entryCount + 512));
 
     return {
         prompt: [
@@ -382,13 +427,15 @@ function balance(source) {
  * @param {object} value
  * @param {{englishOnly?: boolean}} [options] drop Cyrillic keywords the model
  *        produced despite being asked for English ones.
- * @returns {{ok: true, entries: object[]} | {ok: false, error: string}}
+ * @returns {{ok: true, entries: object[], keyless: number} | {ok: false, error: string}}
  */
 export function normalizeEntries(value, options = {}) {
     const list = Array.isArray(value?.entries) ? value.entries : Array.isArray(value) ? value : null;
     if (!list) return { ok: false, error: '"entries" is missing or not an array' };
 
     const entries = [];
+    let keyless = 0;
+
     for (const raw of list.slice(0, MAX_ENTRIES)) {
         if (!raw || typeof raw !== 'object') continue;
 
@@ -399,17 +446,23 @@ export function normalizeEntries(value, options = {}) {
             || String(raw.room ?? '').trim().slice(0, 120)
             || 'Home';
 
+        const keys = normalizeKeySpecs(raw.keys, options.englishOnly === true);
+        if (!keys.length) keyless++;
+
         entries.push({
             title,
             room: String(raw.room ?? '').trim().slice(0, 60),
             content,
             visual: String(raw.visual ?? '').trim().slice(0, 1200),
-            keys: normalizeKeySpecs(raw.keys, options.englishOnly === true),
+            keys,
         });
     }
 
     if (!entries.length) return { ok: false, error: 'no usable entries' };
-    return { ok: true, entries };
+
+    // An entry with no keywords is inert: it lands in the lorebook and never
+    // fires. Reported rather than dropped, so the caller can ask again.
+    return { ok: true, entries, keyless };
 }
 
 const CYRILLIC = /[А-Яа-яЁё]/;
@@ -425,12 +478,20 @@ function isRejectedScript(spec, englishOnly) {
     return values.some(value => CYRILLIC.test(value));
 }
 
-/** Coerce whatever the model called a key into the spec shape keys.js expects. */
+/**
+ * Coerce whatever the model called a key into the spec shape keys.js expects.
+ *
+ * The cap is applied last, after rejects are dropped. Slicing first meant a
+ * model that led with Russian in English-only mode spent the whole allowance
+ * on specs that were then discarded, leaving the entry with no keys at all.
+ */
 function normalizeKeySpecs(raw, englishOnly) {
     const list = Array.isArray(raw) ? raw : [];
     const specs = [];
 
-    for (const item of list.slice(0, MAX_KEYS_PER_ENTRY)) {
+    for (const item of list) {
+        if (specs.length >= MAX_KEYS_PER_ENTRY) break;
+
         if (typeof item === 'string') {
             const value = item.trim();
             if (!value) continue;

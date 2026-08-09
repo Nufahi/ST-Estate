@@ -14,6 +14,7 @@ import {
     reloadEditor,
     saveWorldInfo,
     updateWorldInfoList,
+    world_info,
     world_names,
 } from '../../../world-info.js';
 import { user_avatar } from '../../../personas.js';
@@ -83,6 +84,86 @@ export function chatLorebook() {
 }
 
 /**
+ * Books bound to the character card: the primary `world` field plus any extra
+ * books attached through the character's lorebook list.
+ *
+ * @returns {string[]}
+ */
+export function characterLorebooks() {
+    const context = ctx();
+    const names = [];
+
+    const character = context.characters?.[context.characterId];
+    const primary = character?.data?.extensions?.world;
+    if (typeof primary === 'string' && primary.trim()) names.push(primary.trim());
+
+    // Auxiliary books live in a separate list keyed by the card filename.
+    const key = String(character?.avatar || '').replace(/\.[^.]+$/, '');
+    const extra = key && Array.isArray(world_info?.charLore)
+        ? world_info.charLore.find(entry => entry?.name === key)
+        : null;
+    for (const name of Array.isArray(extra?.extraBooks) ? extra.extraBooks : []) {
+        if (typeof name === 'string' && name.trim()) names.push(name.trim());
+    }
+
+    return [...new Set(names)];
+}
+
+/** Cap on how much lorebook text is worth feeding back into a prompt. */
+const SOURCE_ENTRY_MAX = 600;
+const SOURCE_TOTAL_MAX = 6000;
+const SOURCE_ENTRIES_MAX = 40;
+
+/**
+ * Read the lorebooks attached to this chat and character as source material.
+ *
+ * Entries Estate wrote itself are skipped: feeding a generated description
+ * back in as reference makes every later run a copy of the first.
+ *
+ * @returns {Promise<string>} plain text, empty when there is nothing to read
+ */
+export async function readBoundLore() {
+    const names = [...new Set([chatLorebook(), ...characterLorebooks()].filter(Boolean))];
+    if (!names.length) return '';
+
+    const pieces = [];
+    let budget = SOURCE_TOTAL_MAX;
+    let count = 0;
+
+    for (const name of names) {
+        if (budget <= 0 || count >= SOURCE_ENTRIES_MAX) break;
+
+        let data;
+        try {
+            data = await loadWorldInfo(name);
+        } catch (error) {
+            console.warn(`[Estate] could not read lorebook "${name}"`, error);
+            continue;
+        }
+        if (!data?.entries || typeof data.entries !== 'object') continue;
+
+        for (const entry of Object.values(data.entries)) {
+            if (budget <= 0 || count >= SOURCE_ENTRIES_MAX) break;
+            if (!entry || entry.disable) continue;
+            if (entry[`${STAMP}_created`]) continue;
+
+            const body = String(entry.content || '').replace(/\s+/g, ' ').trim();
+            if (!body) continue;
+
+            const label = String(entry.comment || '').replace(/\s+/g, ' ').trim();
+            const text = label ? `${label}: ${body}` : body;
+            const clipped = text.slice(0, Math.min(SOURCE_ENTRY_MAX, budget));
+
+            pieces.push(clipped);
+            budget -= clipped.length;
+            count++;
+        }
+    }
+
+    return pieces.join('\n\n');
+}
+
+/**
  * Expand `{char}`, `{user}` and `{chat}`, strip characters the filesystem
  * rejects, then append a number if the name is already taken.
  *
@@ -114,6 +195,31 @@ export function buildLorebookName(template) {
 }
 
 /**
+ * Add a book to the character's auxiliary lorebook list, leaving the primary
+ * `world` field untouched. This is the same list the "Character Lore" panel
+ * edits, keyed by the card's avatar filename without its extension.
+ *
+ * @returns {boolean} whether the book is now attached
+ */
+function attachAuxiliaryBook(context, character, name) {
+    const key = String(character?.avatar || '').replace(/\.[^.]+$/, '');
+    if (!key || !world_info) return false;
+
+    if (!Array.isArray(world_info.charLore)) world_info.charLore = [];
+
+    let record = world_info.charLore.find(entry => entry?.name === key);
+    if (!record) {
+        record = { name: key, extraBooks: [] };
+        world_info.charLore.push(record);
+    }
+    if (!Array.isArray(record.extraBooks)) record.extraBooks = [];
+
+    if (!record.extraBooks.includes(name)) record.extraBooks.push(name);
+    context.saveSettingsDebounced();
+    return true;
+}
+
+/**
  * Attach a lorebook to the chat, the character card or the active persona.
  *
  * @param {string} name
@@ -134,8 +240,18 @@ export async function bindLorebook(name, target) {
     if (target === 'character') {
         const characterId = context.characterId;
         if (characterId === undefined || characterId === null) return false;
-        await context.writeExtensionField(characterId, 'world', name);
+
         const character = context.characters?.[characterId];
+        const primary = String(character?.data?.extensions?.world || '').trim();
+
+        // A card that already has a lorebook keeps it. Overwriting `world`
+        // would silently detach the book the character actually depends on,
+        // so an existing one means Estate's book is attached alongside it.
+        if (primary && primary !== name) {
+            return attachAuxiliaryBook(context, character, name);
+        }
+
+        await context.writeExtensionField(characterId, 'world', name);
         if (character?.data?.extensions) character.data.extensions.world = name;
         return true;
     }

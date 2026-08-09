@@ -91,6 +91,8 @@ const STRINGS = {
         context: 'Context to read',
         ctxCard: 'Character card',
         ctxPersona: 'Persona description',
+        ctxLore: 'Existing lorebook',
+        ctxLoreHint: 'Reads the lorebooks bound to this chat and to the character card, so the place fits the world already written. Estate\'s own entries are skipped.',
         ctxHistory: 'Recent messages',
         ctxHistoryCount: 'How many messages',
 
@@ -100,6 +102,7 @@ const STRINGS = {
         stop: 'Stop',
         generating: 'Writing the description…',
         retrying: 'The reply was malformed. Asking again…',
+        retryingKeys: 'The reply came back without keywords. Asking again…',
 
         // Preview
         previewTitle: 'Before writing',
@@ -141,6 +144,7 @@ const STRINGS = {
         toastBusy: 'Wait for the current generation to finish.',
         toastFailed: 'Generation failed. Details are in the console.',
         toastBadJson: 'The model did not return usable JSON. Try again, or switch model.',
+        toastKeyless: '{n} entr(ies) have no keywords and would never fire. Add some in the review step.',
         toastStopped: 'Stopped.',
         toastEmptyResult: 'The model returned no entries.',
         toastNothingSelected: 'Nothing is selected to write.',
@@ -227,6 +231,8 @@ const STRINGS = {
         context: 'Что учитывать',
         ctxCard: 'Карточку персонажа',
         ctxPersona: 'Описание персоны',
+        ctxLore: 'Существующий лорбук',
+        ctxLoreHint: 'Читает лорбуки, привязанные к чату и к карточке персонажа, чтобы место вписалось в уже написанный мир. Записи самого Estate пропускаются.',
         ctxHistory: 'Последние сообщения',
         ctxHistoryCount: 'Сколько сообщений',
 
@@ -235,6 +241,7 @@ const STRINGS = {
         stop: 'Стоп',
         generating: 'Пишу описание…',
         retrying: 'Ответ пришёл кривой. Спрашиваю ещё раз…',
+        retryingKeys: 'Ответ пришёл без ключей. Спрашиваю ещё раз…',
 
         previewTitle: 'Перед записью',
         previewIntro: 'Проверьте записи. Снимите галочки с лишних, поправьте текст и ключи — потом пишите в лорбук.',
@@ -273,6 +280,7 @@ const STRINGS = {
         toastBusy: 'Дождитесь окончания текущей генерации.',
         toastFailed: 'Генерация не удалась. Подробности в консоли.',
         toastBadJson: 'Модель не вернула пригодный JSON. Попробуйте ещё раз или смените модель.',
+        toastKeyless: 'Записей без ключей: {n} — они никогда не сработают. Допишите ключи на шаге проверки.',
         toastStopped: 'Остановлено.',
         toastEmptyResult: 'Модель не вернула ни одной записи.',
         toastNothingSelected: 'Нечего записывать — ничего не выбрано.',

@@ -60,7 +60,9 @@
 }
 .est-title__glyph {
     display: inline-flex;
-    color: var(--est-accent);
+    /* The mark reads as part of the heading, so it takes the text colour
+       rather than the accent — an accented glyph fights the title. */
+    color: inherit;
     font-size: 1.35em;
     line-height: 1;
 }
@@ -508,7 +510,7 @@
 }
 .estate-settings__mark {
     display: inline-flex;
-    color: var(--est-accent);
+    color: inherit;
     font-size: 1.1em;
 }
 

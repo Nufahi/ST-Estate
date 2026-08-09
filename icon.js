@@ -5,36 +5,44 @@
  * tab never drift apart. Font Awesome is deliberately not used here: its
  * house glyphs differ between the icon sets SillyTavern themes ship with,
  * which is exactly how the extension ended up wearing three faces.
+ *
+ * The marks are solid silhouettes painted with `currentColor`, so they take
+ * the colour of the text around them and stay legible on any theme instead of
+ * fighting it with an accent. Cut-outs (door, windows) are holes in the same
+ * path, resolved by `fill-rule="evenodd"` — that way a hole shows the surface
+ * underneath rather than a hardcoded background colour.
  */
 
 const NS = 'http://www.w3.org/2000/svg';
 
 /** House with a chimney — the Estate mark. */
 const HOUSE = [
-    'M3 10.6 12 3.2l9 7.4',
-    'M5.2 9.9V20a1 1 0 0 0 1 1h11.6a1 1 0 0 0 1-1V9.9',
-    'M16.4 5.9V3.6h2.5v4.3',
-    'M9.7 21v-6.1h4.6V21',
+    // Chimney, drawn first so the roof line cuts across its foot.
+    'M16.5 4.1 H19.1 V8.6 L16.5 6.45 Z',
+    // Roof and walls, with the doorway punched out.
+    'M12 2.75 L22.6 11.45 H20.3 V21.5 H3.7 V11.45 H1.4 Z'
+    + ' M10.25 21.5 V15.45 H13.75 V21.5 Z',
 ];
 
-/** Civic building with a central tower — the places tab. */
+/** Civic building with a portico — the places tab. */
 const BUILDING = [
-    'M2.5 21h19',
-    'M5 21V9.4l4-2.6V21',
-    'M19 21V9.4l-4-2.6V21',
-    'M9 21V6.2l3-3.4 3 3.4V21',
-    'M11 21v-3.6h2V21',
-    'M11.2 9.3h1.6',
+    // Pediment and central block, with two window openings.
+    'M12 2.3 L16.4 6.15 V21.4 H7.6 V6.15 Z'
+    + ' M10.55 12.6 V9.35 H13.45 V12.6 Z'
+    + ' M10.55 21.4 V16.1 H13.45 V21.4 Z',
+    // Side wings.
+    'M6.9 8.05 V21.4 H2.35 V11.45 Z',
+    'M17.1 8.05 L21.65 11.45 V21.4 H17.1 Z',
+    // Ground line the whole facade stands on.
+    'M1.25 22.05 H22.75 V23.3 H1.25 Z',
 ];
 
 function draw(paths, className) {
     const svg = document.createElementNS(NS, 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '1.7');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('fill', 'currentColor');
+    svg.setAttribute('fill-rule', 'evenodd');
+    svg.setAttribute('clip-rule', 'evenodd');
     svg.setAttribute('aria-hidden', 'true');
     svg.setAttribute('focusable', 'false');
     if (className) svg.setAttribute('class', className);

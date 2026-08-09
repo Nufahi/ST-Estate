@@ -36,6 +36,10 @@ const STRINGS = {
         clearSection: 'Clear',
         limitReached: 'Up to {n} picks in "{section}".',
 
+        // Folding
+        expandAll: 'Expand all',
+        collapseAll: 'Collapse all',
+
         // Custom tags
         addCustom: '+ own',
         addCustomTitle: 'Add your own tag to "{section}"',
@@ -43,6 +47,12 @@ const STRINGS = {
         customRemove: 'Remove this tag',
         customFull: 'No room for more of your own tags in "{section}".',
         customEmpty: 'An empty tag cannot be added.',
+
+        // Must-cover list
+        cover: 'Must be described',
+        coverMeta: 'up to {n}',
+        coverHint: 'A list of things the description is not allowed to skip. Separate with commas. Say "a studio flat" and you may get a bed and a sitting corner and no kitchen — this is where you insist on the kitchen. Each item gets covered whether or not the model thinks it interesting.',
+        coverPlaceholder: 'kitchen, bathroom, toilet, where the shoes go',
 
         // Free-form
         extra: 'Anything else',
@@ -132,6 +142,11 @@ const STRINGS = {
         settingsOpen: 'Open Estate',
         settingsHeading: 'Defaults',
         settingsNameTemplate: 'New lorebook name',
+        settingsSectionState: 'Tag sections open as',
+        settingsSectionStateDesc: 'There are a lot of them, and an open one builds every chip in it. This decides how the board looks when the dialog opens.',
+        sectionStateCollapsed: 'All collapsed',
+        sectionStateFilled: 'Only the ones with picks',
+        sectionStateExpanded: 'All expanded',
         settingsInstruction: 'Extra instruction',
         settingsInstructionDesc: 'Appended to every generation. Use it for house rules the model keeps forgetting.',
         settingsReset: 'Reset',
@@ -181,12 +196,20 @@ const STRINGS = {
         clearSection: 'Сбросить',
         limitReached: 'В разделе «{section}» можно выбрать не больше {n}.',
 
+        expandAll: 'Развернуть всё',
+        collapseAll: 'Свернуть всё',
+
         addCustom: '+ свой',
         addCustomTitle: 'Добавить свой тег в раздел «{section}»',
         customPrompt: 'Ваш тег для раздела «{section}»:',
         customRemove: 'Удалить этот тег',
         customFull: 'В разделе «{section}» больше нет места для своих тегов.',
         customEmpty: 'Пустой тег добавить нельзя.',
+
+        cover: 'Обязательно описать',
+        coverMeta: 'до {n}',
+        coverHint: 'Список того, что описание пропустить не имеет права. Через запятую. Скажешь «студия» — получишь кровать и уголок с диваном, а кухни и туалета не будет; вот здесь на них и настаиваешь. Каждый пункт будет описан, интересно это модели или нет.',
+        coverPlaceholder: 'кухня, ванная, туалет, где стоит обувь',
 
         extra: 'Что ещё',
         extraHint: 'Своими словами: деталь, правило, вещь, которая обязана там быть. Уходит в промпт как есть.',
@@ -269,6 +292,11 @@ const STRINGS = {
         settingsOpen: 'Открыть Estate',
         settingsHeading: 'По умолчанию',
         settingsNameTemplate: 'Имя нового лорбука',
+        settingsSectionState: 'Разделы при открытии',
+        settingsSectionStateDesc: 'Их много, и раскрытый раздел строит все свои теги сразу. Это решает, как выглядит доска, когда окно открывается.',
+        sectionStateCollapsed: 'Все свёрнуты',
+        sectionStateFilled: 'Только с выбранным',
+        sectionStateExpanded: 'Все развёрнуты',
         settingsInstruction: 'Доп. инструкция',
         settingsInstructionDesc: 'Добавляется к каждой генерации. Сюда — правила, которые модель упорно забывает.',
         settingsReset: 'Сбросить',

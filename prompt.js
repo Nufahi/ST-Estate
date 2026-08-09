@@ -8,7 +8,7 @@
 
 import { SPLIT_SECTION, sectionsFor } from './catalog.js';
 import { promptsFor } from './catalog.js';
-import { customLabels, targetWords } from './settings.js';
+import { coverList, customLabels, targetWords } from './settings.js';
 
 const MAX_ENTRIES = 12;
 
@@ -25,6 +25,15 @@ const KEY_COUNTS = Object.freeze({
 
 /** Absolute ceiling used when normalising a reply, whatever was asked for. */
 const MAX_KEYS_PER_ENTRY = 24;
+
+/**
+ * Words added to the budget for each item on the must-cover list, and the
+ * ceiling on that. A single entry is injected whole every time it fires, so
+ * there is a length past which covering everything costs more context than
+ * the coverage is worth; beyond it the items share the allowance instead.
+ */
+const COVER_WORDS = 45;
+const COVER_WORDS_MAX = 360;
 
 /** Rough token cost of one key spec object, used only to size the reply. */
 const TOKENS_PER_KEY = 24;
@@ -128,6 +137,42 @@ function clean(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * The coverage contract.
+ *
+ * A tag brief describes a kind of place, not a checklist, and models write
+ * about whatever they find interesting: "studio flat" reliably produces the
+ * bed and the sitting corner and no kitchen, no bathroom. Naming the omission
+ * once at the end of a prompt does not fix it either — the instruction has to
+ * be a countable obligation with the items enumerated, which is what this is.
+ *
+ * @param {string[]} items
+ * @param {boolean} perEntry whether each item gets an entry of its own
+ * @returns {string}
+ */
+function coverageRule(items, perEntry) {
+    const numbered = items.map((item, index) => `  ${index + 1}. ${item}`).join('\n');
+    return [
+        `MUST BE DESCRIBED — ${items.length} item(s), all of them:`,
+        numbered,
+        '',
+        'This list is not a suggestion and not a set of themes to gesture at.',
+        'Every item above is described in concrete physical detail — not merely'
+        + ' mentioned in passing, not implied by the presence of something near it.',
+        perEntry
+            ? 'Each item goes in whichever entry it belongs to. An item that fits none'
+              + ' of the listed entries gets an entry of its own.'
+            : 'Each item gets its own passage inside the entry.',
+        'An item that is boring, small or unglamorous is still described: that is'
+        + ' precisely why it was listed. A toilet, a hallway or a place shoes go'
+        + ' gets the same specificity as anything else.',
+        'If an item does not plausibly exist in a place like this, say where its'
+        + ' function actually happens instead — a shared bathroom down the hall, a'
+        + ' washbasin behind a curtain. Never silently drop it.',
+        `Before finishing, check the text against all ${items.length} items and add whatever is missing.`,
+    ].join('\n');
+}
+
 /** Human-readable brief assembled from the tag picks and the free-form field. */
 function buildBrief(settings, mode) {
     const lines = [];
@@ -208,7 +253,6 @@ export function buildRequest(settings, options = {}) {
     const mode = settings.mode === 'place' ? 'place' : 'home';
     const bilingual = settings.keyLanguage !== 'en';
     const counts = bilingual ? KEY_COUNTS.both : KEY_COUNTS.en;
-    const words = targetWords(settings);
     const occupancy = buildOccupancy(ctx, settings, mode);
     const brief = buildBrief(settings, mode);
     const context = buildContext(ctx, settings, options.lore);
@@ -217,6 +261,17 @@ export function buildRequest(settings, options = {}) {
     const perRoom = settings.granularity === 'rooms';
     const parts = promptsFor(splitId, settings.picks?.[splitId], customLabels(settings, splitId));
     const unit = mode === 'place' ? 'zone' : 'room';
+    const cover = coverList(settings.cover);
+
+    // A must-cover list competes with the word budget, and the budget wins:
+    // told to fit ten subjects into 180 words, a model writes a sentence each
+    // and calls it done, which is the omission again wearing a different hat.
+    // Only the single-entry layout needs this — per-room entries already get
+    // the full allowance apiece.
+    const words = targetWords(settings)
+        + (cover.length && !(perRoom && parts.length)
+            ? Math.min(cover.length * COVER_WORDS, COVER_WORDS_MAX)
+            : 0);
 
     const entryPlan = perRoom && parts.length
         ? `Write one entry per listed ${unit}: ${parts.join(', ')}. Add one short entry titled for the ${mode === 'place' ? 'building' : 'home'} as a whole that covers the structure, the approach and the overall impression.`
@@ -256,6 +311,10 @@ export function buildRequest(settings, options = {}) {
         `Produce at most ${MAX_ENTRIES} entries. Between ${counts.min} and ${counts.max} keywords each.`,
         languageRule,
         '',
+        // Placed above the keyword rules rather than at the end: the coverage
+        // contract is about the prose, and an instruction drifting away from
+        // the material it governs is how the omissions started.
+        ...(cover.length ? [coverageRule(cover, perRoom && parts.length > 0), ''] : []),
         KEY_RULES,
         '',
         bilingual ? KEYS_BILINGUAL : KEYS_EN_ONLY,
@@ -292,7 +351,13 @@ export function buildRequest(settings, options = {}) {
         );
     }
 
-    const entryCount = perRoom && parts.length ? Math.min(parts.length + 1, MAX_ENTRIES) : 1;
+    // A must-cover item that matches no listed room is allowed an entry of its
+    // own, so the count is not knowable in advance. It is counted in full here:
+    // responseLength is a ceiling rather than a spend, and the failure it
+    // guards against — a reply truncated before its keys — is the expensive one.
+    const entryCount = perRoom && parts.length
+        ? Math.min(parts.length + 1 + cover.length, MAX_ENTRIES)
+        : 1;
 
     // The budget has to cover the keyword arrays, not just the prose. Sizing it
     // on word count alone is what left talkative models truncated mid-reply,

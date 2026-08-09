@@ -12,6 +12,8 @@ import { language, t } from './i18n.js';
 import { chatLorebook, listLorebooks } from './lorebook.js';
 import {
     BINDINGS,
+    COVER_ITEMS_MAX,
+    COVER_MAX,
     CUSTOM_TAG_MAX,
     DETAILS,
     GRANULARITY,
@@ -20,12 +22,14 @@ import {
     TARGETS,
     addCustomTag,
     clampInt,
+    coverList,
     customTagsFull,
     DETAIL_WORDS,
     getSettings,
     removeCustomTag,
     resolveProfileId,
     saveSettings,
+    startsCollapsed,
     supportedProfiles,
 } from './settings.js';
 
@@ -52,7 +56,17 @@ function buildSection(section, settings, lang) {
         : t('pickOne');
 
     const heading = node('span', 'est-card__meta', limit);
-    const { card: element, body, heading: headingRow } = card(label, heading);
+
+    // Both boards together run to several hundred tags, and every one of them
+    // is a button with its own click listener. Building the lot up front is
+    // what a phone cannot survive — the dialog simply never paints. A section
+    // fills itself the first time it is opened instead.
+    let fill = null;
+    const { card: element, body, heading: headingRow, setCollapsed } = card(label, heading, {
+        collapsible: true,
+        collapsed: startsCollapsed(settings, section.id),
+        onExpand: () => fill?.(),
+    });
     headingRow.appendChild(counter);
 
     const grid = node('div', 'est-chips');
@@ -84,14 +98,15 @@ function buildSection(section, settings, lang) {
         sync();
     };
 
-    for (const chip of section.chips) {
+    const makeChip = chip => {
         const control = /** @type {HTMLButtonElement} */ (node('button', 'est-chip', chip[lang] || chip.en));
         control.type = 'button';
         control.title = chip.prompt;
         control.addEventListener('click', () => toggle(chip.id));
+        control.setAttribute('aria-pressed', String(chosen.has(chip.id)));
         buttons.set(chip.id, control);
-        grid.appendChild(control);
-    }
+        return control;
+    };
 
     // The add control stays last, so newly created tags appear just before it.
     const add = /** @type {HTMLButtonElement} */ (node('button', 'est-chip est-chip--add', t('addCustom')));
@@ -125,9 +140,21 @@ function buildSection(section, settings, lang) {
         grid.insertBefore(control, add);
     };
 
-    for (const text of settings.customTags[section.id] || []) {
-        addCustomChip(customId(text), text);
-    }
+    // Everything above only defined how a chip is made. This is where they
+    // actually get built, and it runs on first expand — or immediately, if
+    // the section starts open.
+    let filled = false;
+    fill = () => {
+        if (filled) return;
+        filled = true;
+        const batch = document.createDocumentFragment();
+        for (const chip of section.chips) batch.appendChild(makeChip(chip));
+        grid.insertBefore(batch, add);
+        for (const text of settings.customTags[section.id] || []) {
+            addCustomChip(customId(text), text);
+        }
+    };
+
     grid.appendChild(add);
 
     // Inline editor rather than a nested popup: this dialog already lives
@@ -181,8 +208,13 @@ function buildSection(section, settings, lang) {
     headingRow.appendChild(clear);
 
     body.append(grid, editor);
+
+    // `card()` runs setCollapsed during construction, before `fill` exists,
+    // so a section that starts open has to be filled here instead.
+    if (!element.classList.contains('est-card--collapsed')) fill();
+
     sync();
-    return element;
+    return { card: element, setCollapsed };
 }
 
 function buildTargetSection(settings, lang) {
@@ -376,9 +408,47 @@ function setBusy(root, busy) {
 }
 
 /** True when at least one tag on the active board or some free text is present. */
-function hasBrief(settings, mode, extraValue) {
-    if (String(extraValue || '').trim()) return true;
+function hasBrief(settings, mode, ...freeText) {
+    if (freeText.some(value => String(value || '').trim())) return true;
     return sectionsFor(mode).some(section => (settings.picks[section.id] || []).length > 0);
+}
+
+/**
+ * The must-cover list.
+ *
+ * The tag boards say what kind of place it is, not what has to appear in the
+ * text. Someone who picks "studio flat" gets whatever rooms the model felt
+ * like writing about — a bed and a sitting corner, and no kitchen, no
+ * bathroom. This is the list it is not allowed to skip, in the user's own
+ * words, and it is enforced per item rather than as a suggestion.
+ */
+function buildCoverSection(settings) {
+    const counter = node('span', 'est-card__count');
+    const { card: element, body, heading: headingRow } = card(t('cover'), node('span', 'est-card__meta', t('coverMeta', { n: COVER_ITEMS_MAX })));
+    headingRow.appendChild(counter);
+
+    // A textarea rather than a single line: this is a list, it can run to
+    // sixteen items, and a one-line field showing three of them at a time is
+    // how an item gets typed twice.
+    const control = textarea(2, settings.cover, t('coverPlaceholder'));
+    control.maxLength = COVER_MAX;
+
+    // The parsed list, shown back as chips. Splitting is forgiving — commas,
+    // semicolons and newlines all separate — so the only way to know what the
+    // model will actually be handed is to see it.
+    const preview = node('div', 'est-cover__list');
+
+    const sync = () => {
+        const items = coverList(control.value);
+        counter.textContent = items.length ? t('sectionCount', { n: items.length }) : '';
+        preview.replaceChildren(...items.map(item => node('span', 'est-cover__item', item)));
+        preview.hidden = !items.length;
+    };
+    control.addEventListener('input', sync);
+    sync();
+
+    body.append(control, preview, hint(t('coverHint')));
+    return { card: element, read: () => control.value.trim() };
 }
 
 /** The place-name field, shown only on the places board. */
@@ -421,11 +491,46 @@ export async function openDialog(onGenerate, onCancel) {
 
     let mode = MODES.includes(settings.mode) ? settings.mode : 'home';
 
-    // Both boards are built once and swapped by hidden flag: rebuilding them on
+    // A board is built once and then swapped by hidden flag: rebuilding it on
     // every switch would throw away half-typed custom tags and scroll position.
     const tabs = node('div', 'est-tabs');
     const panels = node('div', 'est-panels');
     const boards = {};
+
+    /**
+     * Build one board. Called for the active tab immediately and for the other
+     * one the first time it is opened: two full boards is twice the work for a
+     * tab the user may never touch.
+     */
+    const fillPanel = (id, panel) => {
+        const identity = id === 'home' ? buildTargetSection(settings, lang) : buildPlaceNameSection(settings);
+        panel.appendChild(identity.card);
+
+        // Folding nine to eleven sections by hand is worse than the scroll it
+        // saves, so the board carries its own pair of controls.
+        const built = [];
+        const bar = node('div', 'est-foldbar');
+        const expandAll = node('button', 'est-foldbar__button', t('expandAll'));
+        expandAll.type = 'button';
+        const collapseAll = node('button', 'est-foldbar__button', t('collapseAll'));
+        collapseAll.type = 'button';
+        expandAll.addEventListener('click', () => {
+            for (const entry of built) entry.setCollapsed(false);
+        });
+        collapseAll.addEventListener('click', () => {
+            for (const entry of built) entry.setCollapsed(true);
+        });
+        bar.append(expandAll, collapseAll);
+        panel.appendChild(bar);
+
+        for (const section of sectionsFor(id)) {
+            const made = buildSection(section, settings, lang);
+            built.push(made);
+            panel.appendChild(made.card);
+        }
+
+        return identity;
+    };
 
     for (const id of MODES) {
         const tab = /** @type {HTMLButtonElement} */ (node('button', 'est-tab'));
@@ -438,13 +543,14 @@ export async function openDialog(onGenerate, onCancel) {
         const panel = node('div', 'est-panel');
         panel.setAttribute('role', 'tabpanel');
 
-        const identity = id === 'home' ? buildTargetSection(settings, lang) : buildPlaceNameSection(settings);
-        panel.appendChild(identity.card);
-        for (const section of sectionsFor(id)) {
-            panel.appendChild(buildSection(section, settings, lang));
-        }
+        const board = { tab, panel, identity: null };
+        board.build = () => {
+            if (board.identity) return;
+            board.identity = fillPanel(id, panel);
+        };
+        if (id === mode) board.build();
 
-        boards[id] = { tab, panel, identity };
+        boards[id] = board;
         tabs.appendChild(tab);
         panels.appendChild(panel);
     }
@@ -465,6 +571,7 @@ export async function openDialog(onGenerate, onCancel) {
     for (const id of MODES) {
         boards[id].tab.addEventListener('click', () => {
             if (mode === id) return;
+            boards[id].build();
             mode = id;
             settings.mode = id;
             saveSettings();
@@ -473,6 +580,9 @@ export async function openDialog(onGenerate, onCancel) {
     }
 
     root.append(tabs, panels);
+
+    const cover = buildCoverSection(settings);
+    root.appendChild(cover.card);
 
     const extraCard = card(t('extra'));
     const extra = textarea(3, settings.extra, t('extraPlaceholder'));
@@ -514,12 +624,13 @@ export async function openDialog(onGenerate, onCancel) {
     });
 
     generate.addEventListener('click', async () => {
-        if (!hasBrief(settings, mode, extra.value)) {
+        if (!hasBrief(settings, mode, extra.value, cover.read())) {
             toastr.info(t(mode === 'place' ? 'toastNoSelectionPlace' : 'toastNoSelection'), t('title'));
             return;
         }
 
         settings.extra = extra.value.trim();
+        settings.cover = cover.read();
         settings.mode = mode;
         if (mode === 'home') settings.target = boards.home.identity.value();
         else settings.placeName = boards.place.identity.read();

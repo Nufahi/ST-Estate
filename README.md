@@ -12,9 +12,15 @@ keyword patterns that actually fire.
 
 ## What it does
 
-- **A tag board, not a blank prompt.** Nine sections: dwelling, style, means,
-  condition, era, palette, light, rooms, signature features. Plus a free-form
-  field for anything the tags cannot say.
+- **A tag board, not a blank prompt.** Two of them: a home board — dwelling,
+  style, means, condition, era, palette, light, rooms, signature features —
+  and a building board for anywhere nobody lives. Sections fold, and only the
+  ones you open are built. Plus a free-form field for anything the tags
+  cannot say.
+- **A must-cover list.** Tags describe a kind of place, not a checklist. Ask
+  for a studio flat and you get the bed and the sitting corner and no kitchen,
+  no bathroom. Name them here — `kitchen, bathroom, toilet` — and each one is
+  described whether or not the model finds it interesting.
 - **Per-character or per-persona.** Write a home for the character, for your
   persona, or one shared household for both.
 - **A visual block on every entry.** Alongside the prose, each entry carries a
@@ -110,6 +116,7 @@ Under **Extensions → Estate**:
 | Setting | Description |
 | --- | --- |
 | **New lorebook name** | Template for created lorebooks. Placeholders: `{char}`, `{user}`, `{chat}` |
+| **Tag sections open as** | All collapsed, all expanded, or only the ones already holding a pick. A section builds its chips when it opens, so this is a speed setting as much as a layout one |
 | **Extra instruction** | Appended to every generation — for rules the model keeps forgetting |
 
 Everything else lives in the dialog and is remembered between runs.

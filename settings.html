@@ -25,6 +25,18 @@
                     </div>
 
                     <div class="estate-settings__row estate-settings__row--col">
+                        <label class="estate-settings__text" for="estate_section_state">
+                            <span class="estate-settings__label" data-estate-i18n="settingsSectionState">Tag sections open as</span>
+                            <span class="estate-settings__desc" data-estate-i18n="settingsSectionStateDesc">This decides how the board looks when the dialog opens.</span>
+                        </label>
+                        <select id="estate_section_state" class="text_pole">
+                            <option value="collapsed" data-estate-i18n="sectionStateCollapsed">All collapsed</option>
+                            <option value="filled" data-estate-i18n="sectionStateFilled">Only the ones with picks</option>
+                            <option value="expanded" data-estate-i18n="sectionStateExpanded">All expanded</option>
+                        </select>
+                    </div>
+
+                    <div class="estate-settings__row estate-settings__row--col">
                         <label class="estate-settings__text" for="estate_instruction">
                             <span class="estate-settings__label" data-estate-i18n="settingsInstruction">Extra instruction</span>
                             <span class="estate-settings__desc" data-estate-i18n="settingsInstructionDesc">Appended to every generation.</span>

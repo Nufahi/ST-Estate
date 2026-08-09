@@ -22,6 +22,14 @@ export const KEY_LANGUAGES = Object.freeze(['both', 'en']);
 export const DETAILS = Object.freeze(['brief', 'normal', 'rich']);
 export const GRANULARITY = Object.freeze(['single', 'rooms']);
 
+/**
+ * How the tag sections start out. A board is nine to eleven sections and
+ * several hundred chips, so `filled` is the default: a section opens only if
+ * something in it is already picked, which after the first run means the
+ * board opens showing exactly the choices that were made.
+ */
+export const SECTION_STATE = Object.freeze(['collapsed', 'filled', 'expanded']);
+
 /** Approximate word budget per entry, by detail level. */
 export const DETAIL_WORDS = Object.freeze({ brief: 90, normal: 180, rich: 320 });
 
@@ -30,6 +38,15 @@ export const NAME_MAX = 60;
 const INSTRUCTION_MAX = 4000;
 const EXTRA_MAX = 2000;
 const PROFILE_ID_MAX = 200;
+
+/**
+ * The must-cover list: things the description is not allowed to skip. Stored
+ * as the raw text the user typed and split on demand, so editing it back and
+ * forth never loses an item to the parser.
+ */
+export const COVER_MAX = 600;
+export const COVER_ITEMS_MAX = 16;
+const COVER_ITEM_MAX = 60;
 
 /** Caps on user-defined tags, so a runaway paste cannot bloat the settings file. */
 export const CUSTOM_TAG_MAX = 60;
@@ -44,6 +61,7 @@ const DEFAULTS = Object.freeze({
     picks: {},
     customTags: {},
     extra: '',
+    cover: '',
     placeName: '',
     lorebookName: '',
     createNew: true,
@@ -52,6 +70,7 @@ const DEFAULTS = Object.freeze({
     keyLanguage: 'both',
     detail: 'normal',
     granularity: 'single',
+    sectionState: 'filled',
     profileId: '',
     useCard: true,
     usePersona: true,
@@ -224,6 +243,7 @@ export function getSettings() {
         picks: sanitizePicks(raw.picks, customTags),
         customTags,
         extra: normalizeText(raw.extra, EXTRA_MAX, DEFAULTS.extra),
+        cover: normalizeText(raw.cover, COVER_MAX, DEFAULTS.cover),
         placeName: normalizeText(raw.placeName, NAME_MAX * 2, DEFAULTS.placeName),
         lorebookName: normalizeText(raw.lorebookName, NAME_MAX * 2, DEFAULTS.lorebookName),
         createNew: typeof raw.createNew === 'boolean' ? raw.createNew : DEFAULTS.createNew,
@@ -232,6 +252,7 @@ export function getSettings() {
         keyLanguage: oneOf(raw.keyLanguage, KEY_LANGUAGES, DEFAULTS.keyLanguage),
         detail: oneOf(raw.detail, DETAILS, DEFAULTS.detail),
         granularity: oneOf(raw.granularity, GRANULARITY, DEFAULTS.granularity),
+        sectionState: oneOf(raw.sectionState, SECTION_STATE, DEFAULTS.sectionState),
         profileId: normalizeProfileId(raw.profileId),
         useCard: typeof raw.useCard === 'boolean' ? raw.useCard : DEFAULTS.useCard,
         usePersona: typeof raw.usePersona === 'boolean' ? raw.usePersona : DEFAULTS.usePersona,
@@ -251,6 +272,47 @@ export function saveSettings() {
 
 export function defaultNameTemplate() {
     return DEFAULT_NAME_TEMPLATE;
+}
+
+export function defaultSectionState() {
+    return DEFAULTS.sectionState;
+}
+
+/**
+ * Whether a section should open folded, given the setting and whether it
+ * already holds a pick.
+ *
+ * @param {object} settings
+ * @param {string} sectionId
+ * @returns {boolean}
+ */
+export function startsCollapsed(settings, sectionId) {
+    const state = settings?.sectionState;
+    if (state === 'expanded') return false;
+    if (state === 'collapsed') return true;
+    return !(settings?.picks?.[sectionId] || []).length;
+}
+
+/**
+ * Split the must-cover field into individual items.
+ *
+ * Commas, semicolons and newlines all separate, because people type all
+ * three and none of them is wrong. The raw text is what gets stored, so a
+ * half-typed list survives a reopen intact.
+ *
+ * @param {string} value
+ * @returns {string[]}
+ */
+export function coverList(value) {
+    if (typeof value !== 'string') return [];
+    const items = [];
+    for (const piece of stripControlCharacters(value).split(/[,;\n\r]+/)) {
+        const text = piece.replace(/\s+/g, ' ').trim().slice(0, COVER_ITEM_MAX);
+        if (!text || items.some(item => item.toLowerCase() === text.toLowerCase())) continue;
+        items.push(text);
+        if (items.length >= COVER_ITEMS_MAX) break;
+    }
+    return items;
 }
 
 /** @returns {number} the word budget the current detail level asks for. */

@@ -69,18 +69,60 @@ export function segmented(options, active, onChange) {
 /**
  * A titled card with an optional trailing element in its heading.
  *
+ * With `collapsible`, the heading itself becomes the toggle. The body is
+ * hidden with a class rather than the `hidden` attribute, so folding never
+ * collides with a card being hidden outright for some other reason.
+ *
  * @param {string} title
  * @param {HTMLElement} [aside]
- * @returns {{card: HTMLElement, body: HTMLElement, heading: HTMLElement}}
+ * @param {{collapsible?: boolean, collapsed?: boolean, onExpand?: () => void}} [options]
+ *        `onExpand` fires the first time the card is opened, which is where a
+ *        heavy body gets built rather than at construction.
+ * @returns {{card: HTMLElement, body: HTMLElement, heading: HTMLElement,
+ *           setCollapsed?: (value: boolean) => void, isCollapsed?: () => boolean}}
  */
-export function card(title, aside) {
+export function card(title, aside, options = {}) {
     const element = node('section', 'est-card');
     const heading = node('div', 'est-card__heading');
     heading.appendChild(node('span', 'est-card__title', title));
     if (aside) heading.appendChild(aside);
     const body = node('div', 'est-card__body');
     element.append(heading, body);
-    return { card: element, body, heading };
+
+    if (!options.collapsible) return { card: element, body, heading };
+
+    element.classList.add('est-card--collapsible');
+
+    heading.setAttribute('role', 'button');
+    heading.tabIndex = 0;
+
+    let collapsed = false;
+    let expandedOnce = false;
+    const setCollapsed = value => {
+        collapsed = !!value;
+        if (!collapsed && !expandedOnce) {
+            expandedOnce = true;
+            options.onExpand?.();
+        }
+        element.classList.toggle('est-card--collapsed', collapsed);
+        heading.setAttribute('aria-expanded', String(!collapsed));
+    };
+
+    heading.addEventListener('click', event => {
+        // The heading also carries the counter and the Clear button. Only a
+        // click on dead space should fold the card.
+        if (event.target.closest('button, input, select, a')) return;
+        setCollapsed(!collapsed);
+    });
+    heading.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        if (event.target !== heading) return;
+        event.preventDefault();
+        setCollapsed(!collapsed);
+    });
+
+    setCollapsed(options.collapsed);
+    return { card: element, body, heading, setCollapsed, isCollapsed: () => collapsed };
 }
 
 /** @returns {HTMLElement} a muted hint paragraph. */

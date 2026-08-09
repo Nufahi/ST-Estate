@@ -197,6 +197,76 @@
     gap: 10px;
 }
 
+/* --- collapsing --- */
+/* No chevron: the whole heading is the target, and a row of arrows down the
+   side of the dialog reads as clutter rather than as affordance. The folded
+   state is shown by the card going flat instead. */
+.est-card--collapsible > .est-card__heading {
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    /* A tap on a phone should not select the title text. */
+    -webkit-tap-highlight-color: transparent;
+}
+.est-card--collapsible > .est-card__heading:hover .est-card__title {
+    color: var(--est-accent);
+}
+.est-card--collapsed > .est-card__body {
+    display: none;
+}
+/* A folded section should read as a line, not as a live panel. */
+.est-card--collapsed {
+    background: transparent;
+    padding-top: 9px;
+    padding-bottom: 9px;
+}
+
+/* ============================================================
+ * FOLD BAR
+ * ============================================================ */
+.est-foldbar {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+}
+.est-foldbar__button {
+    padding: 3px 10px;
+    border: 1px solid var(--est-border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--est-muted);
+    font-size: 0.76em;
+    cursor: pointer;
+    transition: border-color 0.14s ease, color 0.14s ease;
+}
+.est-foldbar__button:hover {
+    border-color: var(--est-accent);
+    color: var(--est-accent);
+}
+
+/* ============================================================
+ * MUST-COVER LIST
+ * ============================================================ */
+/* The parsed items, echoed back. Separator handling is deliberately loose,
+   so showing what was actually understood is the only honest feedback. */
+.est-cover__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.est-cover__list[hidden] {
+    display: none;
+}
+.est-cover__item {
+    padding: 3px 9px;
+    border: 1px solid var(--est-accent);
+    border-radius: 999px;
+    background: var(--est-accent-soft);
+    color: var(--est-accent);
+    font-size: 0.78em;
+    line-height: 1.3;
+}
+
 /* ============================================================
  * CHIPS
  * ============================================================ */
@@ -697,6 +767,7 @@
     .est-seg,
     .est-tab,
     .est-entry,
+    .est-foldbar__button,
     .estate-settings__row,
     .estate-settings__primary,
     .estate-settings__saved {

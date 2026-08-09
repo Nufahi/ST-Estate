@@ -10,7 +10,7 @@ import { t } from './i18n.js';
 import { buildRequest, extractJson, normalizeEntries } from './prompt.js';
 import { openPreview } from './preview.js';
 import { buildLorebookName, DEPTH, ORDER, readBoundLore, writeEntries } from './lorebook.js';
-import { defaultNameTemplate, getSettings, resolveProfileId, saveSettings } from './settings.js';
+import { defaultNameTemplate, defaultSectionState, getSettings, resolveProfileId, saveSettings } from './settings.js';
 import { mountUi, openDialog, unmountUi } from './ui.js';
 
 const EXT_PATH = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
@@ -264,9 +264,10 @@ function bindSettingsUi(open) {
 
     const nameTemplate = /** @type {HTMLInputElement} */ (root.querySelector('#estate_name_template'));
     const instruction = /** @type {HTMLTextAreaElement} */ (root.querySelector('#estate_instruction'));
+    const sectionState = /** @type {HTMLSelectElement} */ (root.querySelector('#estate_section_state'));
     const reset = root.querySelector('#estate_reset');
     const saved = root.querySelector('#estate_saved');
-    if (!nameTemplate || !instruction || !reset) return;
+    if (!nameTemplate || !instruction || !sectionState || !reset) return;
 
     root.querySelector('#estate_open')?.addEventListener('click', () => open());
 
@@ -287,6 +288,13 @@ function bindSettingsUi(open) {
         flashSaved();
     });
 
+    sectionState.value = settings.sectionState;
+    sectionState.addEventListener('change', () => {
+        settings.sectionState = sectionState.value;
+        saveSettings();
+        flashSaved();
+    });
+
     instruction.value = settings.instruction;
     instruction.addEventListener('change', () => {
         settings.instruction = instruction.value.trim();
@@ -296,8 +304,10 @@ function bindSettingsUi(open) {
 
     reset.addEventListener('click', () => {
         settings.nameTemplate = defaultNameTemplate();
+        settings.sectionState = defaultSectionState();
         settings.instruction = '';
         nameTemplate.value = settings.nameTemplate;
+        sectionState.value = settings.sectionState;
         instruction.value = '';
         saveSettings();
         flashSaved();

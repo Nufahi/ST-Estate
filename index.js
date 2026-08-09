@@ -135,9 +135,11 @@ async function generateEstate(settings, hooks) {
     activeUsesProfile = !!profileId;
 
     try {
+        const parseOptions = { englishOnly: settings.keyLanguage === 'en' };
+
         let attempt = await runGeneration(ctx, settings, profileId, {});
         let parsed = extractJson(attempt.reply);
-        let normalized = parsed.ok ? normalizeEntries(parsed.value) : { ok: false, error: parsed.error };
+        let normalized = parsed.ok ? normalizeEntries(parsed.value, parseOptions) : { ok: false, error: parsed.error };
 
         // One repair pass: the error text goes back to the model verbatim.
         if (!normalized.ok) {
@@ -146,7 +148,7 @@ async function generateEstate(settings, hooks) {
             activeAbort.signal.throwIfAborted();
             attempt = await runGeneration(ctx, settings, profileId, { repair: normalized.error });
             parsed = extractJson(attempt.reply);
-            normalized = parsed.ok ? normalizeEntries(parsed.value) : { ok: false, error: parsed.error };
+            normalized = parsed.ok ? normalizeEntries(parsed.value, parseOptions) : { ok: false, error: parsed.error };
         }
 
         if (!normalized.ok) {

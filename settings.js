@@ -13,8 +13,12 @@ const MODULE_NAME = 'ST-Estate';
 export const TARGETS = Object.freeze(['character', 'persona', 'shared']);
 export const BINDINGS = Object.freeze(['chat', 'character', 'persona', 'none']);
 
-/** Language of the entry text. Keywords are always English regardless. */
-export const LANGUAGES = Object.freeze(['auto', 'en', 'ru']);
+/**
+ * Which scripts keywords are generated in. Entry text is always English;
+ * only the matching side is a choice, because that is what decides whether a
+ * Russian chat can trigger the entry at all.
+ */
+export const KEY_LANGUAGES = Object.freeze(['both', 'en']);
 export const DETAILS = Object.freeze(['brief', 'normal', 'rich']);
 export const GRANULARITY = Object.freeze(['single', 'rooms']);
 
@@ -45,7 +49,7 @@ const DEFAULTS = Object.freeze({
     createNew: true,
     nameTemplate: DEFAULT_NAME_TEMPLATE,
     bind: 'chat',
-    language: 'auto',
+    keyLanguage: 'both',
     detail: 'normal',
     granularity: 'single',
     profileId: '',
@@ -224,7 +228,7 @@ export function getSettings() {
         createNew: typeof raw.createNew === 'boolean' ? raw.createNew : DEFAULTS.createNew,
         nameTemplate: normalizeText(raw.nameTemplate, NAME_MAX * 2, DEFAULT_NAME_TEMPLATE),
         bind: oneOf(raw.bind, BINDINGS, DEFAULTS.bind),
-        language: oneOf(raw.language, LANGUAGES, DEFAULTS.language),
+        keyLanguage: oneOf(raw.keyLanguage, KEY_LANGUAGES, DEFAULTS.keyLanguage),
         detail: oneOf(raw.detail, DETAILS, DEFAULTS.detail),
         granularity: oneOf(raw.granularity, GRANULARITY, DEFAULTS.granularity),
         profileId: normalizeProfileId(raw.profileId),

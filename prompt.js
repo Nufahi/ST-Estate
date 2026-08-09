@@ -11,26 +11,49 @@ import { promptsFor } from './catalog.js';
 import { customLabels, targetWords } from './settings.js';
 
 const MAX_ENTRIES = 12;
-const MAX_KEYS_PER_ENTRY = 16;
+/** Bilingual keying doubles the list, so the cap has to allow for both scripts. */
+const MAX_KEYS_PER_ENTRY = 24;
 
-/** Reply contract handed to the model verbatim. */
-const SCHEMA = `{
-  "entries": [
-    {
-      "title": "short entry title, 2-5 words",
-      "room": "which room, zone or aspect this entry covers, or \\"whole\\" for the entire place",
-      "content": "the description itself",
-      "visual": "comma-separated visual tags: materials, colours, light, notable objects",
-      "keys": [
-        { "mode": "stem",   "lang": "en", "value": "kitchen" },
-        { "mode": "exact",  "lang": "en", "value": "hall" },
-        { "mode": "group",  "lang": "en", "values": ["couch", "sofa", "settee"] },
-        { "mode": "suffix", "lang": "en", "value": "cook", "suffixes": ["s", "ed", "ing"] },
-        { "mode": "proper", "value": "Crimson Bar" }
-      ]
+/**
+ * Reply contract handed to the model verbatim. The key examples follow the
+ * chosen scripts: leaving Cyrillic in the sample while asking for English
+ * keywords is an invitation to drift straight back to Russian.
+ *
+ * @param {boolean} bilingual
+ * @returns {string}
+ */
+function schema(bilingual) {
+    const keys = [
+        '        { "mode": "stem",   "lang": "en", "value": "kitchen" },',
+        '        { "mode": "exact",  "lang": "en", "value": "hall" },',
+        '        { "mode": "group",  "lang": "en", "values": ["couch", "sofa", "settee"] },',
+        '        { "mode": "suffix", "lang": "en", "value": "cook", "suffixes": ["s", "ed", "ing"] },',
+    ];
+    if (bilingual) {
+        keys.push(
+            '        { "mode": "stem",   "lang": "ru", "value": "кухн" },',
+            '        { "mode": "group",  "lang": "ru", "values": ["диван", "кушетк"] },',
+            '        { "mode": "exact",  "lang": "ru", "value": "дом" },',
+        );
     }
-  ]
-}`;
+    keys.push('        { "mode": "proper", "value": "Crimson Bar" }');
+
+    return [
+        '{',
+        '  "entries": [',
+        '    {',
+        '      "title": "short entry title, 2-5 words",',
+        '      "room": "which room, zone or aspect this entry covers, or \\"whole\\" for the entire place",',
+        '      "content": "the description itself",',
+        '      "visual": "comma-separated visual tags: materials, colours, light, notable objects",',
+        '      "keys": [',
+        ...keys,
+        '      ]',
+        '    }',
+        '  ]',
+        '}',
+    ].join('\n');
+}
 
 const KEY_RULES = `KEYWORD RULES — read carefully, this is the part that usually goes wrong.
 
@@ -55,11 +78,27 @@ Give a stem, not a full word: "kitchen", not "kitchens". A stem must be at
 least 4 characters, otherwise use exact.
 A value is always a single word with no spaces — the only exception is
 "proper", which may contain spaces.
+Set "lang" to "ru" or "en" to match the script the value is written in.`;
 
-ENGLISH ONLY. Every keyword value is written in English, always, whatever
-language the description itself uses. Set "lang" to "en" on all of them.
-Proper nouns are the one exception — a name stays in whatever script it is
-written in. Do not supply Russian keywords: they will be discarded.`;
+/** Appended to KEY_RULES when only English keywords are wanted. */
+const KEYS_EN_ONLY = `ENGLISH KEYWORDS ONLY. Every keyword value is written in
+English, whatever language anything else uses. Set "lang" to "en" on all of
+them. Proper nouns are the one exception — a name stays in whatever script it
+is written in. Russian keywords will be discarded.`;
+
+/** Appended to KEY_RULES when the entry must fire in either language. */
+const KEYS_BILINGUAL = `BOTH LANGUAGES, ALWAYS. The chat may be in English or
+in Russian, and the entry has to fire either way. For every concept you key
+on, give the English keyword AND its Russian equivalent as two separate
+entries in the list:
+
+  { "mode": "stem", "lang": "en", "value": "kitchen" },
+  { "mode": "stem", "lang": "ru", "value": "кухн" }
+
+This is not optional and it is the mistake that gets made most often: a list
+containing only English keywords is a failed reply. Roughly half of your
+keywords must be Russian. Russian stems follow the same rule — give the root
+without its ending: "кухн", not "кухня"; "кварти", not "квартира".`;
 
 function clean(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -102,19 +141,6 @@ function buildOccupancy(ctx, settings, mode) {
     return { subject: charName, line: `This is the home of ${charName}.` };
 }
 
-/** Resolve `auto` into the language the chat is actually written in. */
-function resolveLanguage(ctx, settings) {
-    if (settings.language === 'ru' || settings.language === 'en') return settings.language;
-    const sample = (ctx.chat || [])
-        .filter(message => message && !message.is_system && typeof message.mes === 'string')
-        .slice(-6)
-        .map(message => message.mes)
-        .join(' ');
-    if (/[А-Яа-яЁё]/.test(sample)) return 'ru';
-    const description = clean(ctx.getCharacterCardFields?.()?.description || '');
-    return /[А-Яа-яЁё]/.test(description) ? 'ru' : 'en';
-}
-
 /** Only the context the user asked for, trimmed to something sane. */
 function buildContext(ctx, settings) {
     const parts = [];
@@ -143,12 +169,12 @@ function buildContext(ctx, settings) {
  * @param {object} settings
  * @param {{repair?: string}} [options] `repair` carries the parser error back
  *        to the model on the retry pass.
- * @returns {{prompt: Array<{role: string, content: string}>, responseLength: number, mode: 'home'|'place', language: 'en'|'ru'}}
+ * @returns {{prompt: Array<{role: string, content: string}>, responseLength: number, mode: 'home'|'place', bilingual: boolean}}
  */
 export function buildRequest(settings, options = {}) {
     const ctx = SillyTavern.getContext();
     const mode = settings.mode === 'place' ? 'place' : 'home';
-    const language = resolveLanguage(ctx, settings);
+    const bilingual = settings.keyLanguage !== 'en';
     const words = targetWords(settings);
     const occupancy = buildOccupancy(ctx, settings, mode);
     const brief = buildBrief(settings, mode);
@@ -163,11 +189,9 @@ export function buildRequest(settings, options = {}) {
         ? `Write one entry per listed ${unit}: ${parts.join(', ')}. Add one short entry titled for the ${mode === 'place' ? 'building' : 'home'} as a whole that covers the structure, the approach and the overall impression.`
         : `Write a single entry covering the whole ${mode === 'place' ? 'building' : 'home'}. If the place has clearly distinct areas, give each its own paragraph inside that one entry.`;
 
-    // Text follows the chat, keys never do: keyword matching is what the
-    // compiler in keys.js is tuned for, and it is tuned for English.
-    const languageRule = language === 'ru'
-        ? 'Write "title" and "content" in Russian. "visual" stays in English — it feeds image generation. All keyword values are English regardless.'
-        : 'Write "title", "content" and "visual" in English.';
+    // Entry text is always English; only the keys are a choice, because they
+    // are what decides whether a Russian chat can trigger the entry.
+    const languageRule = 'Write "title", "content" and "visual" in English, always, whatever language the chat uses.';
 
     const subject = mode === 'place'
         ? 'You are a set designer writing reference material for a roleplay. You describe the buildings a story passes through.'
@@ -196,14 +220,16 @@ export function buildRequest(settings, options = {}) {
         '- Example: "exposed red brick, black steel window frames, worn oak floor, brass floor lamp, low winter sun, dust in the light, olive velvet sofa".',
         '',
         entryPlan,
-        `Produce at most ${MAX_ENTRIES} entries. Between 4 and ${MAX_KEYS_PER_ENTRY} keywords each.`,
+        `Produce at most ${MAX_ENTRIES} entries. Between ${bilingual ? 8 : 4} and ${bilingual ? MAX_KEYS_PER_ENTRY : 16} keywords each.`,
         languageRule,
         '',
         KEY_RULES,
         '',
+        bilingual ? KEYS_BILINGUAL : KEYS_EN_ONLY,
+        '',
         'OUTPUT',
         'Reply with a single JSON object and nothing else. No prose before or after, no markdown fences.',
-        SCHEMA,
+        schema(bilingual),
     ].join('\n');
 
     const userParts = [occupancy.line];
@@ -238,7 +264,7 @@ export function buildRequest(settings, options = {}) {
         ],
         responseLength,
         mode,
-        language,
+        bilingual,
     };
 }
 
@@ -354,9 +380,11 @@ function balance(source) {
  * still edit the raw stems before they become patterns.
  *
  * @param {object} value
+ * @param {{englishOnly?: boolean}} [options] drop Cyrillic keywords the model
+ *        produced despite being asked for English ones.
  * @returns {{ok: true, entries: object[]} | {ok: false, error: string}}
  */
-export function normalizeEntries(value) {
+export function normalizeEntries(value, options = {}) {
     const list = Array.isArray(value?.entries) ? value.entries : Array.isArray(value) ? value : null;
     if (!list) return { ok: false, error: '"entries" is missing or not an array' };
 
@@ -376,7 +404,7 @@ export function normalizeEntries(value) {
             room: String(raw.room ?? '').trim().slice(0, 60),
             content,
             visual: String(raw.visual ?? '').trim().slice(0, 1200),
-            keys: normalizeKeySpecs(raw.keys),
+            keys: normalizeKeySpecs(raw.keys, options.englishOnly === true),
         });
     }
 
@@ -387,18 +415,18 @@ export function normalizeEntries(value) {
 const CYRILLIC = /[А-Яа-яЁё]/;
 
 /**
- * Keywords are English by contract. Models drift back to the chat language
- * anyway, so a Cyrillic value is dropped here rather than compiled into a
- * pattern nobody asked for. Proper nouns keep whatever script they came in.
+ * When English-only keys were asked for, models drift back to Russian anyway,
+ * so a Cyrillic value is dropped here rather than compiled into a pattern
+ * nobody asked for. Proper nouns keep whatever script they came in.
  */
-function isRejectedScript(spec) {
-    if (spec.mode === 'proper') return false;
+function isRejectedScript(spec, englishOnly) {
+    if (!englishOnly || spec.mode === 'proper') return false;
     const values = [spec.value, ...(spec.values || [])].filter(Boolean);
     return values.some(value => CYRILLIC.test(value));
 }
 
 /** Coerce whatever the model called a key into the spec shape keys.js expects. */
-function normalizeKeySpecs(raw) {
+function normalizeKeySpecs(raw, englishOnly) {
     const list = Array.isArray(raw) ? raw : [];
     const specs = [];
 
@@ -407,7 +435,7 @@ function normalizeKeySpecs(raw) {
             const value = item.trim();
             if (!value) continue;
             const spec = { mode: /\s/.test(value) ? 'proper' : 'stem', value };
-            if (!isRejectedScript(spec)) specs.push(spec);
+            if (!isRejectedScript(spec, englishOnly)) specs.push(spec);
             continue;
         }
         if (!item || typeof item !== 'object') continue;
@@ -425,7 +453,7 @@ function normalizeKeySpecs(raw) {
         if (Array.isArray(item.suffixes)) {
             spec.suffixes = item.suffixes.map(suffix => String(suffix ?? '').trim()).filter(Boolean);
         }
-        if (!isRejectedScript(spec)) specs.push(spec);
+        if (!isRejectedScript(spec, englishOnly)) specs.push(spec);
     }
 
     return specs;

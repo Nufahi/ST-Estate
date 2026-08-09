@@ -16,7 +16,7 @@ import {
     DETAILS,
     GRANULARITY,
     HISTORY_LIMITS,
-    LANGUAGES,
+    KEY_LANGUAGES,
     TARGETS,
     addCustomTag,
     clampInt,
@@ -323,11 +323,10 @@ function buildOutputSection(settings) {
     const granularityField = field(t('granularity'), granularity.row);
     granularityField.appendChild(splitHint);
 
-    const languageSelect = select([
-        { value: 'auto', label: t('langAuto') },
-        { value: 'en', label: t('langEn') },
-        { value: 'ru', label: t('langRu') },
-    ], LANGUAGES.includes(settings.language) ? settings.language : 'auto');
+    const keyLanguage = segmented([
+        { id: 'both', label: t('keyLangBoth') },
+        { id: 'en', label: t('keyLangEn') },
+    ], KEY_LANGUAGES.includes(settings.keyLanguage) ? settings.keyLanguage : 'both');
 
     body.append(
         bookField,
@@ -336,7 +335,8 @@ function buildOutputSection(settings) {
         field(t('detail'), detail.row),
         detailHint,
         granularityField,
-        field(t('language'), languageSelect, t('languageNote')),
+        field(t('keyLanguage'), keyLanguage.row, t('keyLanguageHint')),
+        hint(t('languageNote')),
     );
 
     return {
@@ -355,7 +355,7 @@ function buildOutputSection(settings) {
             settings.bind = bindSelect.value;
             settings.detail = detail.value();
             settings.granularity = granularity.value();
-            settings.language = languageSelect.value;
+            settings.keyLanguage = keyLanguage.value();
         },
     };
 }

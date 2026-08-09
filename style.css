@@ -36,6 +36,16 @@
     height: 1.15em;
 }
 
+/* The menu lays its rows out on the text baseline, which a Font Awesome glyph
+   has and an SVG does not: the box's own bottom edge becomes the baseline, so
+   the mark sinks below the label. The row is centred instead. */
+#estate_wand_button {
+    align-items: center;
+}
+#estate_wand_button .est-menu-icon {
+    align-self: center;
+}
+
 /* ============================================================
  * SHARED SHELL
  * ============================================================ */
@@ -446,10 +456,22 @@
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    padding-top: 4px;
     position: sticky;
     bottom: 0;
     z-index: 2;
+    /* The bar floats over a scrolling board, so it needs a surface of its own:
+       without one the chips slide underneath and read straight through the
+       buttons. The negative margin lets it span the dialog's own padding. */
+    margin: 0 -4px -4px;
+    padding: 6px 4px 4px;
+    background: var(--est-bg);
+    border-top: 1px solid var(--est-border);
+}
+
+/* `.menu_button` sets `display: flex`, which outranks the `hidden` attribute —
+   which is why Stop sat there from the moment the dialog opened. */
+.est-actions .menu_button[hidden] {
+    display: none;
 }
 
 .est-generate,

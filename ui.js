@@ -16,6 +16,7 @@ import {
     DETAILS,
     GRANULARITY,
     HISTORY_LIMITS,
+    LANGUAGES,
     TARGETS,
     addCustomTag,
     clampInt,
@@ -322,6 +323,12 @@ function buildOutputSection(settings) {
     const granularityField = field(t('granularity'), granularity.row);
     granularityField.appendChild(splitHint);
 
+    const languageSelect = select([
+        { value: 'auto', label: t('langAuto') },
+        { value: 'en', label: t('langEn') },
+        { value: 'ru', label: t('langRu') },
+    ], LANGUAGES.includes(settings.language) ? settings.language : 'auto');
+
     body.append(
         bookField,
         nameField,
@@ -329,7 +336,7 @@ function buildOutputSection(settings) {
         field(t('detail'), detail.row),
         detailHint,
         granularityField,
-        hint(t('languageNote')),
+        field(t('language'), languageSelect, t('languageNote')),
     );
 
     return {
@@ -348,6 +355,7 @@ function buildOutputSection(settings) {
             settings.bind = bindSelect.value;
             settings.detail = detail.value();
             settings.granularity = granularity.value();
+            settings.language = languageSelect.value;
         },
     };
 }

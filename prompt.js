@@ -4,6 +4,10 @@
  * The model is asked for JSON and nothing else, and is explicitly told not to
  * write regular expressions: it declares keyword stems with a mode, and
  * keys.js compiles those into patterns that are correct by construction.
+ *
+ * The `settings` object handed in here is the global preferences and the
+ * chat's brief already merged by index.js. Nothing in this file needs to know
+ * which half a field came from.
  */
 
 import { SPLIT_SECTION, sectionsFor } from './catalog.js';

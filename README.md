@@ -56,7 +56,16 @@ Pick your tags, choose where the entries should go, press **Generate**. The
 review dialog opens with the finished entries; edit anything, then **Write to
 lorebook**.
 
-Your picks are remembered, so the next home starts from the last one.
+Your picks are remembered **per chat**. The tags, the free text, the must-cover
+list, whose home it is and which lorebook it lands in belong to the chat they
+were chosen in, and they travel with it on export or import. Opening Estate in
+a different chat gives a clean board rather than the last story's answers.
+
+What stays global is what is about you rather than about a place: the model,
+the entry length, the keyword script, the context toggles, the lorebook name
+template, and any tags you invented yourself — a tag you made up is part of
+your vocabulary, and retyping it in every chat would be the same annoyance
+from the other end.
 
 ## Keywords
 

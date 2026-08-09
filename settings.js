@@ -1,14 +1,28 @@
 /**
  * Estate — settings storage.
  *
- * Everything read out of `extensionSettings` is rebuilt through an allowlist,
- * so a hand-edited or half-migrated settings file can never hand a malformed
- * value to the prompt builder or the lorebook writer.
+ * Two stores, because the things kept here answer two different questions.
+ *
+ * `extensionSettings` holds preferences: which model, how long an entry runs,
+ * which script the keys use. Those are about how the user likes to work and
+ * belong to the user, so they are global.
+ *
+ * `chatMetadata` holds the brief: the tags, the free text, the must-cover
+ * list, whose home it is, which lorebook it lands in. Those are about one
+ * particular place in one particular story, and keeping them global meant
+ * every chat opened showing the last chat's answers.
+ *
+ * Everything read out of either store is rebuilt through an allowlist, so a
+ * hand-edited or half-migrated file can never hand a malformed value to the
+ * prompt builder or the lorebook writer.
  */
 
 import { MODES, SECTIONS, chipIds, customId, isCustomId } from './catalog.js';
 
 const MODULE_NAME = 'ST-Estate';
+
+/** Where the per-chat brief lives inside `chatMetadata`. */
+const BRIEF_KEY = 'estate_brief_v1';
 
 export const TARGETS = Object.freeze(['character', 'persona', 'shared']);
 export const BINDINGS = Object.freeze(['chat', 'character', 'persona', 'none']);
@@ -68,16 +82,13 @@ const CUSTOM_TAGS_PER_SECTION = 24;
 const DEFAULT_NAME_TEMPLATE = 'Estate - {char}';
 const DEFAULT_INSTRUCTION = '';
 
+/**
+ * Global preferences. How the user likes to work, not what they are building.
+ * `customTags` sits here deliberately: a tag someone invented is part of their
+ * vocabulary, and having to retype it in every chat would be the same
+ * complaint from the other direction.
+ */
 const DEFAULTS = Object.freeze({
-    mode: 'home',
-    target: 'character',
-    picks: {},
-    customTags: {},
-    extra: '',
-    cover: '',
-    placeName: '',
-    lorebookName: '',
-    createNew: true,
     nameTemplate: DEFAULT_NAME_TEMPLATE,
     bind: 'chat',
     keyLanguage: 'both',
@@ -92,6 +103,19 @@ const DEFAULTS = Object.freeze({
     useHistory: false,
     historyCount: 20,
     instruction: DEFAULT_INSTRUCTION,
+    customTags: {},
+});
+
+/** The per-chat brief. One place, one story — this is what used to leak. */
+const BRIEF_DEFAULTS = Object.freeze({
+    mode: 'home',
+    target: 'character',
+    picks: {},
+    extra: '',
+    cover: '',
+    placeName: '',
+    lorebookName: '',
+    createNew: true,
 });
 
 let cached = null;
@@ -212,7 +236,12 @@ export function addCustomTag(settings, sectionId, text) {
 }
 
 /**
- * Forget a user-defined tag and deselect it everywhere.
+ * Forget a user-defined tag.
+ *
+ * Only the vocabulary is touched here. The pick that referred to the tag is
+ * dropped by the caller, which holds the brief: a tag deleted in one chat
+ * must not silently rewrite the picks of every other one. Briefs elsewhere
+ * shed the dead id on their next read, in `sanitizePicks`.
  *
  * @param {object} settings
  * @param {string} sectionId
@@ -220,12 +249,9 @@ export function addCustomTag(settings, sectionId, text) {
  */
 export function removeCustomTag(settings, sectionId, id) {
     const list = settings.customTags[sectionId];
-    if (Array.isArray(list)) {
-        settings.customTags[sectionId] = list.filter(item => customId(item) !== id);
-        if (!settings.customTags[sectionId].length) delete settings.customTags[sectionId];
-    }
-    const picked = settings.picks[sectionId];
-    if (Array.isArray(picked)) settings.picks[sectionId] = picked.filter(item => item !== id);
+    if (!Array.isArray(list)) return;
+    settings.customTags[sectionId] = list.filter(item => customId(item) !== id);
+    if (!settings.customTags[sectionId].length) delete settings.customTags[sectionId];
 }
 
 /** @returns {boolean} whether the section has room for another custom tag. */
@@ -252,15 +278,7 @@ export function getSettings() {
     const raw = plainObject(current);
     const customTags = sanitizeCustomTags(raw.customTags);
     cached = {
-        mode: oneOf(raw.mode, MODES, DEFAULTS.mode),
-        target: oneOf(raw.target, TARGETS, DEFAULTS.target),
-        picks: sanitizePicks(raw.picks, customTags),
         customTags,
-        extra: normalizeText(raw.extra, EXTRA_MAX, DEFAULTS.extra),
-        cover: normalizeText(raw.cover, COVER_MAX, DEFAULTS.cover),
-        placeName: normalizeText(raw.placeName, NAME_MAX * 2, DEFAULTS.placeName),
-        lorebookName: normalizeText(raw.lorebookName, NAME_MAX * 2, DEFAULTS.lorebookName),
-        createNew: typeof raw.createNew === 'boolean' ? raw.createNew : DEFAULTS.createNew,
         nameTemplate: normalizeText(raw.nameTemplate, NAME_MAX * 2, DEFAULT_NAME_TEMPLATE),
         bind: oneOf(raw.bind, BINDINGS, DEFAULTS.bind),
         keyLanguage: oneOf(raw.keyLanguage, KEY_LANGUAGES, DEFAULTS.keyLanguage),
@@ -285,6 +303,81 @@ export function saveSettings() {
     SillyTavern.getContext().saveSettingsDebounced();
 }
 
+// ---------------------------------------------------------------------------
+// The per-chat brief
+// ---------------------------------------------------------------------------
+
+/** @returns {object|null} `chatMetadata`, or null when no chat is open. */
+function chatMeta() {
+    try {
+        const ctx = SillyTavern.getContext();
+        return ctx.chatMetadata || ctx.chat_metadata || null;
+    } catch {
+        return null;
+    }
+}
+
+/** @returns {boolean} whether a chat is open and a brief can be persisted. */
+export function hasChat() {
+    return !!chatMeta();
+}
+
+/**
+ * Rebuild a stored brief through the allowlist. Custom tags come from the
+ * global store, because that is where the user's own vocabulary lives — a
+ * pick referring to one is only valid while the tag itself still exists.
+ *
+ * @param {object} raw
+ * @param {object} customTags
+ * @returns {object}
+ */
+function sanitizeBrief(raw, customTags) {
+    const value = plainObject(raw);
+    return {
+        mode: oneOf(value.mode, MODES, BRIEF_DEFAULTS.mode),
+        target: oneOf(value.target, TARGETS, BRIEF_DEFAULTS.target),
+        picks: sanitizePicks(value.picks, customTags),
+        extra: normalizeText(value.extra, EXTRA_MAX, BRIEF_DEFAULTS.extra),
+        cover: normalizeText(value.cover, COVER_MAX, BRIEF_DEFAULTS.cover),
+        placeName: normalizeText(value.placeName, NAME_MAX * 2, BRIEF_DEFAULTS.placeName),
+        lorebookName: normalizeText(value.lorebookName, NAME_MAX * 2, BRIEF_DEFAULTS.lorebookName),
+        createNew: typeof value.createNew === 'boolean' ? value.createNew : BRIEF_DEFAULTS.createNew,
+    };
+}
+
+/**
+ * The brief for the open chat. Mutate it in place, then call `saveBrief()`.
+ *
+ * With no chat open the caller still gets a usable object; it simply is not
+ * persisted. Dropping those writes is deliberate — the alternative is holding
+ * them until a chat opens and then stamping that chat with answers meant for
+ * nothing in particular, which is the bug this whole split exists to fix.
+ *
+ * @returns {object}
+ */
+export function getBrief() {
+    const settings = getSettings();
+    const meta = chatMeta();
+    if (!meta) return sanitizeBrief({}, settings.customTags);
+
+    // Rebuilt in place: the object handed back is the one stored on the chat,
+    // so a UI holding a reference keeps writing somewhere that gets saved.
+    const clean = sanitizeBrief(meta[BRIEF_KEY], settings.customTags);
+    meta[BRIEF_KEY] = clean;
+    return clean;
+}
+
+/** Persist the brief. ST debounces the underlying file write. */
+export function saveBrief() {
+    try {
+        const ctx = SillyTavern.getContext();
+        if (typeof ctx.saveMetadataDebounced === 'function') ctx.saveMetadataDebounced();
+        else if (typeof ctx.saveMetadata === 'function') ctx.saveMetadata();
+    } catch (error) {
+        console.warn('[Estate] saveMetadata failed', error);
+    }
+}
+
 export function defaultNameTemplate() {
     return DEFAULT_NAME_TEMPLATE;
 }
@@ -294,18 +387,19 @@ export function defaultSectionState() {
 }
 
 /**
- * Whether a section should open folded, given the setting and whether it
- * already holds a pick.
+ * Whether a section should open folded. The preference is global, the picks
+ * it is measured against belong to the chat.
  *
  * @param {object} settings
+ * @param {object} brief
  * @param {string} sectionId
  * @returns {boolean}
  */
-export function startsCollapsed(settings, sectionId) {
+export function startsCollapsed(settings, brief, sectionId) {
     const state = settings?.sectionState;
     if (state === 'expanded') return false;
     if (state === 'collapsed') return true;
-    return !(settings?.picks?.[sectionId] || []).length;
+    return !(brief?.picks?.[sectionId] || []).length;
 }
 
 /**

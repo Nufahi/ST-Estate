@@ -26,9 +26,12 @@ import {
     coverList,
     customTagsFull,
     DETAIL_WORDS,
+    getBrief,
     getSettings,
+    hasChat,
     removeCustomTag,
     resolveProfileId,
+    saveBrief,
     saveSettings,
     startsCollapsed,
     supportedProfiles,
@@ -46,10 +49,13 @@ function closeWandMenu() {
 }
 
 /**
- * Chip grid for one catalog section, wired directly to `settings.picks`.
+ * Chip grid for one catalog section, wired directly to `brief.picks`.
  * Catalog chips come first, then the user's own tags, then the add control.
+ *
+ * The picks belong to the chat and the custom tags to the user, so this
+ * writes to both stores and saves each on its own.
  */
-function buildSection(section, settings, lang) {
+function buildSection(section, settings, brief, lang) {
     const label = section[lang] || section.en;
     const counter = node('span', 'est-card__count');
     const limit = section.multi
@@ -65,20 +71,20 @@ function buildSection(section, settings, lang) {
     let fill = null;
     const { card: element, body, heading: headingRow, setCollapsed } = card(label, heading, {
         collapsible: true,
-        collapsed: startsCollapsed(settings, section.id),
+        collapsed: startsCollapsed(settings, brief, section.id),
         onExpand: () => fill?.(),
     });
     headingRow.appendChild(counter);
 
     const grid = node('div', 'est-chips');
-    const chosen = new Set(settings.picks[section.id] || []);
+    const chosen = new Set(brief.picks[section.id] || []);
     const buttons = new Map();
 
     const sync = () => {
         for (const [id, chip] of buttons) chip.setAttribute('aria-pressed', String(chosen.has(id)));
         counter.textContent = chosen.size ? t('sectionCount', { n: chosen.size }) : '';
-        settings.picks[section.id] = [...chosen];
-        saveSettings();
+        brief.picks[section.id] = [...chosen];
+        saveBrief();
     };
 
     /** Selecting honours the section cap and the single-choice rule alike. */
@@ -128,7 +134,10 @@ function buildSection(section, settings, lang) {
         remove.addEventListener('click', event => {
             // Without this the click would also toggle the chip it sits on.
             event.stopPropagation();
+            // The tag leaves the user's vocabulary, so the global store is
+            // written too; the pick that referred to it dies with it.
             removeCustomTag(settings, section.id, id);
+            saveSettings();
             chosen.delete(id);
             buttons.delete(id);
             control.remove();
@@ -218,7 +227,7 @@ function buildSection(section, settings, lang) {
     return { card: element, setCollapsed };
 }
 
-function buildTargetSection(settings, lang) {
+function buildTargetSection(brief, lang) {
     const context = SillyTavern.getContext();
     const charName = String(context.name2 || t('targetChar'));
     const userName = String(context.name1 || t('targetPersona'));
@@ -230,8 +239,8 @@ function buildTargetSection(settings, lang) {
             { id: 'persona', label: userName },
             { id: 'shared', label: t('targetShared') },
         ],
-        TARGETS.includes(settings.target) ? settings.target : 'character',
-        id => { settings.target = id; saveSettings(); },
+        TARGETS.includes(brief.target) ? brief.target : 'character',
+        id => { brief.target = id; saveBrief(); },
     );
     body.append(control.row, hint(t('targetHint')));
     return { card: element, value: control.value };
@@ -303,7 +312,7 @@ function buildContextSection(settings) {
     };
 }
 
-function buildOutputSection(settings) {
+function buildOutputSection(settings, brief) {
     const { card: element, body } = card(t('output'));
 
     const books = listLorebooks();
@@ -311,7 +320,10 @@ function buildOutputSection(settings) {
     const options = [{ value: NEW_BOOK, label: t('lorebookNew') }];
     for (const name of books) options.push({ value: name, label: name });
 
-    const stored = settings.createNew ? NEW_BOOK : settings.lorebookName;
+    // Which book this chat writes to is part of the brief; the book bound to
+    // the chat is the fallback, which is right for a chat opened for the
+    // first time and never wrong for one that has already answered.
+    const stored = brief.createNew ? NEW_BOOK : brief.lorebookName;
     const initial = options.some(option => option.value === stored)
         ? stored
         : (bound && books.includes(bound) ? bound : NEW_BOOK);
@@ -415,8 +427,8 @@ function buildOutputSection(settings) {
         },
         read() {
             const creating = bookSelect.value === NEW_BOOK;
-            settings.createNew = creating;
-            settings.lorebookName = creating ? '' : bookSelect.value;
+            brief.createNew = creating;
+            brief.lorebookName = creating ? '' : bookSelect.value;
             settings.nameTemplate = nameInput.value.trim() || settings.nameTemplate;
             settings.bind = bindSelect.value;
             settings.detail = detail.value();
@@ -441,9 +453,9 @@ function setBusy(root, busy) {
 }
 
 /** True when at least one tag on the active board or some free text is present. */
-function hasBrief(settings, mode, ...freeText) {
+function hasBrief(brief, mode, ...freeText) {
     if (freeText.some(value => String(value || '').trim())) return true;
-    return sectionsFor(mode).some(section => (settings.picks[section.id] || []).length > 0);
+    return sectionsFor(mode).some(section => (brief.picks[section.id] || []).length > 0);
 }
 
 /**
@@ -455,7 +467,7 @@ function hasBrief(settings, mode, ...freeText) {
  * bathroom. This is the list it is not allowed to skip, in the user's own
  * words, and it is enforced per item rather than as a suggestion.
  */
-function buildCoverSection(settings) {
+function buildCoverSection(brief) {
     const counter = node('span', 'est-card__count');
     const { card: element, body, heading: headingRow } = card(t('cover'), node('span', 'est-card__meta', t('coverMeta', { n: COVER_ITEMS_MAX })));
     headingRow.appendChild(counter);
@@ -463,7 +475,7 @@ function buildCoverSection(settings) {
     // A textarea rather than a single line: this is a list, it can run to
     // sixteen items, and a one-line field showing three of them at a time is
     // how an item gets typed twice.
-    const control = textarea(2, settings.cover, t('coverPlaceholder'));
+    const control = textarea(2, brief.cover, t('coverPlaceholder'));
     control.maxLength = COVER_MAX;
 
     // The parsed list, shown back as chips. Splitting is forgiving — commas,
@@ -485,9 +497,9 @@ function buildCoverSection(settings) {
 }
 
 /** The place-name field, shown only on the places board. */
-function buildPlaceNameSection(settings) {
+function buildPlaceNameSection(brief) {
     const { card: element, body } = card(t('placeName'));
-    const control = input('text', { maxlength: 60, value: settings.placeName });
+    const control = input('text', { maxlength: 60, value: brief.placeName });
     body.append(control, hint(t('placeNameHint')));
     control.placeholder = t('placeNamePlaceholder');
     return { card: element, read: () => control.value.trim() };
@@ -496,7 +508,7 @@ function buildPlaceNameSection(settings) {
 /**
  * Open the Estate dialog.
  *
- * @param {(settings: object, hooks: {status: (text: string) => void}) => Promise<boolean>} onGenerate
+ * @param {(settings: object, brief: object, hooks: {status: (text: string) => void}) => Promise<boolean>} onGenerate
  *        Resolves true when the flow finished and the dialog should close.
  * @param {() => boolean} onCancel
  */
@@ -505,6 +517,7 @@ export async function openDialog(onGenerate, onCancel) {
 
     const context = SillyTavern.getContext();
     const settings = getSettings();
+    const brief = getBrief();
     const lang = language();
 
     if (!resolveProfileId(settings) && context.mainApi !== 'openai' && !supportedProfiles().length) {
@@ -522,7 +535,11 @@ export async function openDialog(onGenerate, onCancel) {
     title.append(glyph, heading);
     root.append(title, node('p', 'est-intro', t('intro')));
 
-    let mode = MODES.includes(settings.mode) ? settings.mode : 'home';
+    // Without a chat there is nowhere to keep the answers, and silently
+    // discarding them at the end is worse than saying so at the start.
+    if (!hasChat()) root.appendChild(node('p', 'est-warn', t('noChatWarning')));
+
+    let mode = MODES.includes(brief.mode) ? brief.mode : 'home';
 
     // A board is built once and then swapped by hidden flag: rebuilding it on
     // every switch would throw away half-typed custom tags and scroll position.
@@ -536,7 +553,7 @@ export async function openDialog(onGenerate, onCancel) {
      * tab the user may never touch.
      */
     const fillPanel = (id, panel) => {
-        const identity = id === 'home' ? buildTargetSection(settings, lang) : buildPlaceNameSection(settings);
+        const identity = id === 'home' ? buildTargetSection(brief, lang) : buildPlaceNameSection(brief);
         panel.appendChild(identity.card);
 
         // Folding nine to eleven sections by hand is worse than the scroll it
@@ -557,7 +574,7 @@ export async function openDialog(onGenerate, onCancel) {
         panel.appendChild(bar);
 
         for (const section of sectionsFor(id)) {
-            const made = buildSection(section, settings, lang);
+            const made = buildSection(section, settings, brief, lang);
             built.push(made);
             panel.appendChild(made.card);
         }
@@ -588,7 +605,7 @@ export async function openDialog(onGenerate, onCancel) {
         panels.appendChild(panel);
     }
 
-    const output = buildOutputSection(settings);
+    const output = buildOutputSection(settings, brief);
 
     const applyMode = () => {
         for (const id of MODES) {
@@ -606,19 +623,19 @@ export async function openDialog(onGenerate, onCancel) {
             if (mode === id) return;
             boards[id].build();
             mode = id;
-            settings.mode = id;
-            saveSettings();
+            brief.mode = id;
+            saveBrief();
             applyMode();
         });
     }
 
     root.append(tabs, panels);
 
-    const cover = buildCoverSection(settings);
+    const cover = buildCoverSection(brief);
     root.appendChild(cover.card);
 
     const extraCard = card(t('extra'));
-    const extra = textarea(3, settings.extra, t('extraPlaceholder'));
+    const extra = textarea(3, brief.extra, t('extraPlaceholder'));
     extraCard.body.append(extra, hint(t('extraHint')));
     root.appendChild(extraCard.card);
 
@@ -657,26 +674,27 @@ export async function openDialog(onGenerate, onCancel) {
     });
 
     generate.addEventListener('click', async () => {
-        if (!hasBrief(settings, mode, extra.value, cover.read())) {
+        if (!hasBrief(brief, mode, extra.value, cover.read())) {
             toastr.info(t(mode === 'place' ? 'toastNoSelectionPlace' : 'toastNoSelection'), t('title'));
             return;
         }
 
-        settings.extra = extra.value.trim();
-        settings.cover = cover.read();
-        settings.mode = mode;
-        if (mode === 'home') settings.target = boards.home.identity.value();
-        else settings.placeName = boards.place.identity.read();
+        brief.extra = extra.value.trim();
+        brief.cover = cover.read();
+        brief.mode = mode;
+        if (mode === 'home') brief.target = boards.home.identity.value();
+        else brief.placeName = boards.place.identity.read();
         contextSection.read();
         output.read();
         saveSettings();
+        saveBrief();
 
         setBusy(root, true);
         stop.disabled = false;
 
         let done = false;
         try {
-            done = await onGenerate(settings, {
+            done = await onGenerate(settings, brief, {
                 status: text => { status.textContent = text; },
             });
         } catch (error) {
@@ -689,11 +707,29 @@ export async function openDialog(onGenerate, onCancel) {
         if (done) popup.complete(context.POPUP_RESULT.AFFIRMATIVE);
     });
 
+    // Switching chats swaps chatMetadata underneath us, and the board is
+    // still holding the old chat's brief. Every later keystroke would be
+    // written to a detached object — silently lost at best, and at worst
+    // saved into the wrong chat. Closing is the honest answer.
+    const eventSource = context.eventSource;
+    const chatChanged = context.eventTypes?.CHAT_CHANGED || context.event_types?.CHAT_CHANGED;
+    const onChatChanged = () => {
+        if (root.classList.contains('est-dialog--busy')) return;
+        toastr.info(t('toastChatChanged'), t('title'));
+        popup.complete(context.POPUP_RESULT.CANCELLED);
+    };
+    if (eventSource && chatChanged) eventSource.on(chatChanged, onChatChanged);
+
     dialogOpen = true;
     try {
         await popup.show();
     } finally {
         dialogOpen = false;
+        try {
+            if (eventSource && chatChanged) eventSource.removeListener?.(chatChanged, onChatChanged);
+        } catch (error) {
+            console.warn('[Estate] unbind CHAT_CHANGED', error);
+        }
     }
 }
 

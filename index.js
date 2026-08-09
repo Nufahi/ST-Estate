@@ -10,7 +10,7 @@ import { t } from './i18n.js';
 import { buildRequest, extractJson, normalizeEntries } from './prompt.js';
 import { openPreview } from './preview.js';
 import { buildLorebookName, DEPTH, ORDER, readBoundLore, writeEntries } from './lorebook.js';
-import { defaultNameTemplate, defaultSectionState, getSettings, resolveProfileId, saveSettings } from './settings.js';
+import { defaultNameTemplate, defaultSectionState, getSettings, resolveProfileId, saveBrief, saveSettings } from './settings.js';
 import { mountUi, openDialog, unmountUi } from './ui.js';
 
 const EXT_PATH = new URL('.', import.meta.url).pathname.replace(/\/$/, '');
@@ -80,19 +80,19 @@ async function runGeneration(ctx, settings, profileId, options) {
  * Who the entries belong to, for the badge in each title. Resolved once per
  * run so a character switch mid-generation cannot mislabel half the batch.
  */
-function resolveOrigin(ctx, settings) {
-    const mode = settings.mode === 'place' ? 'place' : 'home';
+function resolveOrigin(ctx, brief) {
+    const mode = brief.mode === 'place' ? 'place' : 'home';
     if (mode === 'place') return { mode, target: 'place', owner: '' };
 
     const charName = String(ctx.name2 || '').trim();
     const userName = String(ctx.name1 || '').trim();
-    const owner = settings.target === 'persona'
+    const owner = brief.target === 'persona'
         ? userName
-        : settings.target === 'shared'
+        : brief.target === 'shared'
             ? [charName, userName].filter(Boolean).join(' & ')
             : charName;
 
-    return { mode, target: settings.target, owner };
+    return { mode, target: brief.target, owner };
 }
 
 /**
@@ -113,11 +113,12 @@ function applyTiers(entries) {
 /**
  * The whole flow behind the dialog's Generate button.
  *
- * @param {object} settings
+ * @param {object} settings global preferences
+ * @param {object} brief the answers belonging to this chat
  * @param {{status: (text: string) => void}} hooks
  * @returns {Promise<boolean>} true when entries were written
  */
-async function generateEstate(settings, hooks) {
+async function generateEstate(settings, brief, hooks) {
     if (inFlight || is_send_press) {
         toastr.warning(t('toastBusy'), t('title'));
         return false;
@@ -134,6 +135,11 @@ async function generateEstate(settings, hooks) {
     activeAbort = new AbortController();
     activeUsesProfile = !!profileId;
 
+    // The prompt builder wants one object. The stores are merged here rather
+    // than in prompt.js, so the split stays a storage concern and nothing
+    // downstream of it has to know there are two.
+    const request = { ...settings, ...brief };
+
     try {
         const parseOptions = { englishOnly: settings.keyLanguage === 'en' };
 
@@ -148,7 +154,7 @@ async function generateEstate(settings, hooks) {
             }
         }
 
-        let attempt = await runGeneration(ctx, settings, profileId, { lore });
+        let attempt = await runGeneration(ctx, request, profileId, { lore });
         let parsed = extractJson(attempt.reply);
         let normalized = parsed.ok ? normalizeEntries(parsed.value, parseOptions) : { ok: false, error: parsed.error };
 
@@ -163,7 +169,7 @@ async function generateEstate(settings, hooks) {
             hooks.status(t(normalized.ok ? 'retryingKeys' : 'retrying'));
             activeAbort.signal.throwIfAborted();
 
-            const retry = await runGeneration(ctx, settings, profileId, { repair: repairReason, lore });
+            const retry = await runGeneration(ctx, request, profileId, { repair: repairReason, lore });
             const retryParsed = extractJson(retry.reply);
             const retryNormalized = retryParsed.ok
                 ? normalizeEntries(retryParsed.value, parseOptions)
@@ -196,9 +202,9 @@ async function generateEstate(settings, hooks) {
             return false;
         }
 
-        const isNew = settings.createNew || !settings.lorebookName;
-        const book = isNew ? buildLorebookName(settings.nameTemplate) : settings.lorebookName;
-        const origin = resolveOrigin(ctx, settings);
+        const isNew = brief.createNew || !brief.lorebookName;
+        const book = isNew ? buildLorebookName(settings.nameTemplate) : brief.lorebookName;
+        const origin = resolveOrigin(ctx, brief);
 
         return await openPreview(entries, { book, isNew, mode: origin.mode }, async selected => {
             try {
@@ -215,11 +221,11 @@ async function generateEstate(settings, hooks) {
                 }
                 if (result.bindFailed) toastr.warning(t('toastBindFailed'), t('title'));
 
-                // A freshly created book becomes the default target next time.
+                // A freshly created book becomes this chat's target next time.
                 if (isNew) {
-                    settings.createNew = false;
-                    settings.lorebookName = result.name;
-                    saveSettings();
+                    brief.createNew = false;
+                    brief.lorebookName = result.name;
+                    saveBrief();
                 }
                 return true;
             } catch (error) {

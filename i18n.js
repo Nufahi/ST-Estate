@@ -54,6 +54,9 @@ const STRINGS = {
         coverHint: 'A list of things the description is not allowed to skip. Separate with commas. Say "a studio flat" and you may get a bed and a sitting corner and no kitchen — this is where you insist on the kitchen. Each item gets covered whether or not the model thinks it interesting.',
         coverPlaceholder: 'kitchen, bathroom, toilet, where the shoes go',
 
+        // No chat open
+        noChatWarning: 'No chat is open, so these answers cannot be saved anywhere. Open a chat first, or the board will be blank again next time.',
+
         // Free-form
         extra: 'Anything else',
         extraHint: 'Written in your own words: a detail, a rule, a thing that must be there. Goes straight into the prompt.',
@@ -163,6 +166,7 @@ const STRINGS = {
         toastFailed: 'Generation failed. Details are in the console.',
         toastBadJson: 'The model did not return usable JSON. Try again, or switch model.',
         toastKeyless: '{n} entr(ies) have no keywords and would never fire. Add some in the review step.',
+        toastChatChanged: 'The chat changed, so the board closed — its answers belong to the chat they were made in.',
         toastStopped: 'Stopped.',
         toastEmptyResult: 'The model returned no entries.',
         toastNothingSelected: 'Nothing is selected to write.',
@@ -213,6 +217,8 @@ const STRINGS = {
         coverMeta: 'до {n}',
         coverHint: 'Список того, что описание пропустить не имеет права. Через запятую. Скажешь «студия» — получишь кровать и уголок с диваном, а кухни и туалета не будет; вот здесь на них и настаиваешь. Каждый пункт будет описан, интересно это модели или нет.',
         coverPlaceholder: 'кухня, ванная, туалет, где стоит обувь',
+
+        noChatWarning: 'Чат не открыт — сохранить эти ответы некуда. Откройте чат, иначе в следующий раз доска снова будет пустой.',
 
         extra: 'Что ещё',
         extraHint: 'Своими словами: деталь, правило, вещь, которая обязана там быть. Уходит в промпт как есть.',
@@ -315,6 +321,7 @@ const STRINGS = {
         toastFailed: 'Генерация не удалась. Подробности в консоли.',
         toastBadJson: 'Модель не вернула пригодный JSON. Попробуйте ещё раз или смените модель.',
         toastKeyless: 'Записей без ключей: {n} — они никогда не сработают. Допишите ключи на шаге проверки.',
+        toastChatChanged: 'Чат сменился, и доска закрылась — её ответы принадлежат тому чату, в котором их выбирали.',
         toastStopped: 'Остановлено.',
         toastEmptyResult: 'Модель не вернула ни одной записи.',
         toastNothingSelected: 'Нечего записывать — ничего не выбрано.',

@@ -334,7 +334,14 @@ async function mountSettings(open) {
     const block = template.content.firstElementChild;
     if (!block) throw new Error('Settings template is empty.');
 
-    host.appendChild(block);
+    // Every extension appends its card whenever its own fetch happens to
+    // return, so the column order is a race and comes out differently on each
+    // reload. Estate belongs above Facets, which is a sibling extension by the
+    // same hand, so it is placed rather than appended.
+    const facets = host.querySelector('.facets-settings');
+    if (facets) host.insertBefore(block, facets);
+    else host.appendChild(block);
+
     bindSettingsUi(open);
 }
 

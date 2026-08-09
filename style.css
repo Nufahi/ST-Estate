@@ -36,14 +36,21 @@
     height: 1.15em;
 }
 
-/* The menu lays its rows out on the text baseline, which a Font Awesome glyph
-   has and an SVG does not: the box's own bottom edge becomes the baseline, so
-   the mark sinks below the label. The row is centred instead. */
-#estate_wand_button {
+/* Menu rows are laid out on the text baseline. A Font Awesome button — which
+   is what every other extension puts here — is a box of text and has one; an
+   inline SVG is a replaced element, and its baseline is its own bottom edge,
+   so the mark hangs a descender's worth below the label. The row is centred
+   instead, the way the glyph rows end up looking anyway.
+
+   The id alone is not enough: core styles the row through
+   `#extensionsMenu > div:not(.extension_container)`, which carries an id, a
+   class and a type, so the parent has to be named here to outweigh it. */
+#extensionsMenu > #estate_wand_button,
+#extensionsMenu > .extension_container > #estate_wand_button {
     align-items: center;
-}
-#estate_wand_button .est-menu-icon {
-    align-self: center;
+    /* Same colour the Font Awesome buttons take, including the 0.5 opacity
+       core fades the row to until it is hovered. */
+    color: var(--SmartThemeBodyColor);
 }
 
 /* ============================================================

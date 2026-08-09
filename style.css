@@ -1,0 +1,439 @@
+/* ============================================================
+ * Estate for SillyTavern
+ * ============================================================ */
+
+:root {
+    --est-fg: var(--SmartThemeBodyColor, #e6e6e6);
+    --est-border: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.14));
+    --est-accent: var(--SmartThemeQuoteColor, #c9a227);
+    --est-surface: rgba(255, 255, 255, 0.04);
+    --est-surface-strong: rgba(255, 255, 255, 0.07);
+    --est-muted: color-mix(in srgb, var(--est-fg) 58%, transparent);
+    --est-accent-soft: color-mix(in srgb, var(--est-accent) 16%, transparent);
+}
+
+/* ============================================================
+ * SHARED SHELL
+ * ============================================================ */
+.est-dialog,
+.est-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    text-align: left;
+    color: var(--est-fg);
+}
+
+.est-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.est-title h3 {
+    margin: 0;
+    font-size: 1.12em;
+    letter-spacing: 0.02em;
+}
+.est-title__glyph {
+    color: var(--est-accent);
+    font-size: 1.2em;
+    line-height: 1;
+}
+
+.est-intro {
+    margin: 0;
+    font-size: 0.88em;
+    line-height: 1.5;
+    color: var(--est-muted);
+}
+
+.est-hint {
+    margin: 0;
+    font-size: 0.8em;
+    line-height: 1.45;
+    color: var(--est-muted);
+}
+
+.est-warn {
+    margin: 0;
+    padding: 6px 10px;
+    border-radius: 8px;
+    border-left: 3px solid var(--est-accent);
+    background: var(--est-accent-soft);
+    font-size: 0.8em;
+    line-height: 1.4;
+}
+
+/* ============================================================
+ * CARDS
+ * ============================================================ */
+.est-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--est-border);
+    border-radius: 12px;
+    background: var(--est-surface);
+}
+
+.est-card__heading {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.est-card__title {
+    font-weight: 700;
+    font-size: 0.94em;
+    letter-spacing: 0.02em;
+}
+.est-card__meta,
+.est-card__count {
+    font-size: 0.76em;
+    color: var(--est-muted);
+}
+.est-card__count {
+    color: var(--est-accent);
+}
+.est-card__clear {
+    margin-left: auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--est-muted);
+    font-size: 0.76em;
+    cursor: pointer;
+    text-decoration: underline dotted;
+}
+.est-card__clear:hover {
+    color: var(--est-accent);
+}
+
+.est-card__body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+/* ============================================================
+ * CHIPS
+ * ============================================================ */
+.est-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.est-chip {
+    padding: 5px 11px;
+    border: 1px solid var(--est-border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--est-fg);
+    font-size: 0.83em;
+    line-height: 1.3;
+    cursor: pointer;
+    transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.est-chip:hover {
+    border-color: color-mix(in srgb, var(--est-accent) 50%, var(--est-border));
+    background: var(--est-surface-strong);
+}
+.est-chip[aria-pressed="true"] {
+    border-color: var(--est-accent);
+    background: var(--est-accent-soft);
+    color: var(--est-accent);
+    font-weight: 600;
+}
+
+/* ============================================================
+ * SEGMENTED CONTROL
+ * ============================================================ */
+.est-segmented {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 3px;
+    border: 1px solid var(--est-border);
+    border-radius: 10px;
+    background: var(--est-surface-strong);
+}
+
+.est-seg {
+    flex: 1 1 auto;
+    min-width: 84px;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--est-fg);
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: background 0.14s ease, color 0.14s ease;
+}
+.est-seg:hover {
+    background: var(--est-surface);
+}
+.est-seg[aria-pressed="true"] {
+    background: var(--est-accent-soft);
+    color: var(--est-accent);
+    font-weight: 600;
+}
+
+/* ============================================================
+ * FIELDS
+ * ============================================================ */
+.est-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.est-field__label {
+    font-weight: 600;
+    font-size: 0.87em;
+}
+.est-field--off {
+    opacity: 0.42;
+    pointer-events: none;
+}
+
+.est-textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 62px;
+    line-height: 1.5;
+}
+
+.est-number {
+    max-width: 130px;
+    text-align: center;
+}
+
+.est-toggle-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 6px;
+}
+
+.est-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+.est-toggle:hover {
+    background: var(--est-surface-strong);
+}
+.est-toggle input[type="checkbox"] {
+    flex: 0 0 auto;
+    margin: 0;
+}
+.est-toggle__label {
+    font-size: 0.86em;
+}
+
+/* ============================================================
+ * ACTIONS / STATUS
+ * ============================================================ */
+.est-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 4px;
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+}
+
+.est-generate,
+.est-write {
+    font-weight: 600;
+}
+
+.est-status {
+    padding: 8px 12px;
+    border: 1px solid var(--est-border);
+    border-left: 3px solid var(--est-accent);
+    border-radius: 10px;
+    background: var(--est-surface);
+    font-size: 0.85em;
+}
+
+.est-dialog--busy .est-card,
+.est-preview--busy .est-entry {
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+/* ============================================================
+ * PREVIEW
+ * ============================================================ */
+.est-preview__toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--est-border);
+}
+
+.est-summary {
+    flex: 1 1 auto;
+    min-width: 180px;
+    font-size: 0.85em;
+    color: var(--est-accent);
+    font-weight: 600;
+}
+
+.est-preview__list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.est-entry {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--est-border);
+    border-left: 3px solid var(--est-accent);
+    border-radius: 12px;
+    background: var(--est-surface);
+    transition: opacity 0.14s ease, border-color 0.14s ease;
+}
+.est-entry--off {
+    opacity: 0.4;
+    border-left-color: var(--est-border);
+}
+.est-entry--off .est-entry__body {
+    display: none;
+}
+
+.est-entry__head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.est-entry__head input[type="checkbox"] {
+    flex: 0 0 auto;
+    margin: 0;
+}
+.est-entry__title {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-weight: 600;
+}
+
+.est-entry__body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.est-entry__label {
+    font-size: 0.76em;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--est-muted);
+    margin-top: 4px;
+}
+
+/* ============================================================
+ * COMPILED KEYS
+ * ============================================================ */
+.est-keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.est-key {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 3px 9px;
+    border: 1px solid var(--est-border);
+    border-radius: 999px;
+    background: var(--est-surface-strong);
+    font-size: 0.78em;
+    cursor: help;
+}
+.est-key__text {
+    font-weight: 600;
+}
+.est-key__kind {
+    font-size: 0.86em;
+    color: var(--est-muted);
+}
+
+/* ============================================================
+ * SETTINGS CARD
+ * ============================================================ */
+.estate-settings__card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 6px 2px 4px;
+    color: var(--est-fg);
+}
+
+.estate-settings__section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--est-border);
+}
+
+.estate-settings__heading {
+    margin: 0;
+    font-size: 0.9em;
+    letter-spacing: 0.02em;
+}
+
+.estate-settings__reset {
+    align-self: flex-start;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ============================================================
+ * RESPONSIVE
+ * ============================================================ */
+@media (max-width: 600px) {
+    .est-card {
+        padding: 10px 11px;
+    }
+    .est-chip {
+        font-size: 0.8em;
+        padding: 5px 9px;
+    }
+    .est-seg {
+        min-width: 0;
+        flex-basis: calc(50% - 4px);
+    }
+    .est-toggle-grid {
+        grid-template-columns: 1fr;
+    }
+    .est-actions {
+        flex-direction: column-reverse;
+    }
+    .est-actions .menu_button {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .est-chip,
+    .est-seg,
+    .est-entry {
+        transition: none;
+    }
+}

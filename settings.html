@@ -1,0 +1,34 @@
+<div class="estate-settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>⌂ Estate</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content" style="display: none;">
+            <div class="estate-settings__card">
+                <p class="est-hint" data-estate-i18n="settingsIntro">Defaults for the Estate dialog.</p>
+
+                <section class="estate-settings__section">
+                    <h4 class="estate-settings__heading" data-estate-i18n="settingsHeading">Defaults</h4>
+
+                    <label class="est-field" for="estate_name_template">
+                        <span class="est-field__label" data-estate-i18n="settingsNameTemplate">New lorebook name</span>
+                        <input id="estate_name_template" type="text" class="text_pole" maxlength="120">
+                        <span class="est-hint" data-estate-i18n="nameTemplateHint">Placeholders: {char}, {user}, {chat}.</span>
+                    </label>
+
+                    <label class="est-field" for="estate_instruction">
+                        <span class="est-field__label" data-estate-i18n="settingsInstruction">Extra instruction</span>
+                        <textarea id="estate_instruction" class="text_pole est-textarea" rows="4"></textarea>
+                        <span class="est-hint" data-estate-i18n="settingsInstructionDesc">Appended to every generation.</span>
+                    </label>
+
+                    <button id="estate_reset" type="button" class="menu_button estate-settings__reset">
+                        <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+                        <span data-estate-i18n="settingsReset">Reset</span>
+                    </button>
+                </section>
+            </div>
+        </div>
+    </div>
+</div>

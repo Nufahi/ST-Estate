@@ -1,0 +1,8 @@
+# Windows "Mark of the Web" alternate-data-stream files
+*:Zone.Identifier
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~

@@ -19,7 +19,13 @@ export const BINDINGS = Object.freeze(['chat', 'character', 'persona', 'none']);
  * Russian chat can trigger the entry at all.
  */
 export const KEY_LANGUAGES = Object.freeze(['both', 'en']);
-export const DETAILS = Object.freeze(['brief', 'normal', 'rich']);
+/**
+ * Detail levels. `custom` carries its own number in `detailWords` instead of
+ * reading one from the table: the three presets cover the usual cases and
+ * nothing between or beyond them, which is a strange thing to withhold when
+ * the value is a plain word count.
+ */
+export const DETAILS = Object.freeze(['brief', 'normal', 'rich', 'custom']);
 export const GRANULARITY = Object.freeze(['single', 'rooms']);
 
 /**
@@ -32,6 +38,13 @@ export const SECTION_STATE = Object.freeze(['collapsed', 'filled', 'expanded']);
 
 /** Approximate word budget per entry, by detail level. */
 export const DETAIL_WORDS = Object.freeze({ brief: 90, normal: 180, rich: 320 });
+
+/**
+ * Bounds on a hand-typed word count. The floor is where an entry stops being
+ * a description; the ceiling is where one lorebook entry starts costing more
+ * context every time it fires than the detail is worth.
+ */
+export const DETAIL_WORD_LIMITS = Object.freeze({ min: 40, max: 900 });
 
 export const HISTORY_LIMITS = Object.freeze({ min: 0, max: 200 });
 export const NAME_MAX = 60;
@@ -69,6 +82,7 @@ const DEFAULTS = Object.freeze({
     bind: 'chat',
     keyLanguage: 'both',
     detail: 'normal',
+    detailWords: DETAIL_WORDS.normal,
     granularity: 'single',
     sectionState: 'filled',
     profileId: '',
@@ -251,6 +265,7 @@ export function getSettings() {
         bind: oneOf(raw.bind, BINDINGS, DEFAULTS.bind),
         keyLanguage: oneOf(raw.keyLanguage, KEY_LANGUAGES, DEFAULTS.keyLanguage),
         detail: oneOf(raw.detail, DETAILS, DEFAULTS.detail),
+        detailWords: clampInt(raw.detailWords, DETAIL_WORD_LIMITS, DEFAULTS.detailWords),
         granularity: oneOf(raw.granularity, GRANULARITY, DEFAULTS.granularity),
         sectionState: oneOf(raw.sectionState, SECTION_STATE, DEFAULTS.sectionState),
         profileId: normalizeProfileId(raw.profileId),
@@ -317,7 +332,10 @@ export function coverList(value) {
 
 /** @returns {number} the word budget the current detail level asks for. */
 export function targetWords(settings) {
-    return DETAIL_WORDS[settings.detail] || DETAIL_WORDS.normal;
+    if (settings?.detail === 'custom') {
+        return clampInt(settings.detailWords, DETAIL_WORD_LIMITS, DETAIL_WORDS.normal);
+    }
+    return DETAIL_WORDS[settings?.detail] || DETAIL_WORDS.normal;
 }
 
 /**

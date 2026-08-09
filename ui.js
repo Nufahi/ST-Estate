@@ -16,6 +16,7 @@ import {
     COVER_MAX,
     CUSTOM_TAG_MAX,
     DETAILS,
+    DETAIL_WORD_LIMITS,
     GRANULARITY,
     HISTORY_LIMITS,
     KEY_LANGUAGES,
@@ -341,10 +342,40 @@ function buildOutputSection(settings) {
         { id: 'brief', label: t('detailBrief') },
         { id: 'normal', label: t('detailNormal') },
         { id: 'rich', label: t('detailRich') },
+        { id: 'custom', label: t('detailCustom') },
     ], DETAILS.includes(settings.detail) ? settings.detail : 'normal');
+
+    // The hand-typed count. It seeds from whichever preset was last active, so
+    // switching to "own" starts from the number already in force rather than
+    // from a default the user has just moved away from.
+    const detailWords = input('number', {
+        min: DETAIL_WORD_LIMITS.min,
+        max: DETAIL_WORD_LIMITS.max,
+        step: 10,
+        value: settings.detail === 'custom'
+            ? settings.detailWords
+            : DETAIL_WORDS[settings.detail] || DETAIL_WORDS.normal,
+    });
+    detailWords.classList.add('est-number');
+    const detailWordsField = field(t('detailWords'), detailWords);
+
     const detailHint = hint('');
-    const syncDetail = () => { detailHint.textContent = t('detailHint', { n: DETAIL_WORDS[detail.value()] }); };
-    for (const item of detail.buttons) item.addEventListener('click', syncDetail);
+    const syncDetail = () => {
+        const custom = detail.value() === 'custom';
+        detailWordsField.hidden = !custom;
+        detailHint.textContent = custom
+            ? t('detailCustomHint', { min: DETAIL_WORD_LIMITS.min, max: DETAIL_WORD_LIMITS.max })
+            : t('detailHint', { n: DETAIL_WORDS[detail.value()] });
+    };
+    for (const item of detail.buttons) {
+        item.addEventListener('click', () => {
+            // Carry the preset's number across, so "own" opens on the value
+            // that was actually in effect a moment ago.
+            const preset = DETAIL_WORDS[item.dataset.value];
+            if (preset) detailWords.value = String(preset);
+            syncDetail();
+        });
+    }
     syncDetail();
 
     const granularity = segmented([
@@ -368,6 +399,7 @@ function buildOutputSection(settings) {
         bindField,
         field(t('detail'), detail.row),
         detailHint,
+        detailWordsField,
         granularityField,
         field(t('keyLanguage'), keyLanguage.row, t('keyLanguageHint')),
         hint(t('languageNote')),
@@ -388,6 +420,7 @@ function buildOutputSection(settings) {
             settings.nameTemplate = nameInput.value.trim() || settings.nameTemplate;
             settings.bind = bindSelect.value;
             settings.detail = detail.value();
+            settings.detailWords = clampInt(detailWords.value, DETAIL_WORD_LIMITS, settings.detailWords);
             settings.granularity = granularity.value();
             settings.keyLanguage = keyLanguage.value();
         },

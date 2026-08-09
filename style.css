@@ -388,6 +388,11 @@
     flex-direction: column;
     gap: 5px;
 }
+/* `display` on the class outranks the `hidden` attribute, so a field hidden
+   in JS would otherwise stay on screen. */
+.est-field[hidden] {
+    display: none;
+}
 .est-field__label {
     font-weight: 600;
     font-size: 0.87em;

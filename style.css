@@ -3,6 +3,7 @@
  * ============================================================ */
 
 :root {
+    --est-bg: var(--SmartThemeBlurTintColor, var(--SmartThemeBotMesBlurTintColor, #1a1a1a));
     --est-fg: var(--SmartThemeBodyColor, #e6e6e6);
     --est-border: var(--SmartThemeBorderColor, rgba(255, 255, 255, 0.14));
     --est-accent: var(--SmartThemeQuoteColor, #c9a227);
@@ -10,6 +11,29 @@
     --est-surface-strong: rgba(255, 255, 255, 0.07);
     --est-muted: color-mix(in srgb, var(--est-fg) 58%, transparent);
     --est-accent-soft: color-mix(in srgb, var(--est-accent) 16%, transparent);
+    --est-set-surface: color-mix(in srgb, var(--est-bg) 88%, rgba(255, 255, 255, 0.03) 12%);
+    --est-set-surface-strong: color-mix(in srgb, var(--est-bg) 80%, rgba(255, 255, 255, 0.08) 20%);
+    --est-set-accent-soft: color-mix(in srgb, var(--est-accent) 16%, var(--est-bg) 84%);
+}
+
+/* ============================================================
+ * ICON
+ * ============================================================ */
+.est-icon {
+    display: block;
+    width: 1em;
+    height: 1em;
+}
+
+/* The wand menu sizes its own glyphs, so the mark has to match them. */
+.est-menu-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.est-menu-icon .est-icon {
+    width: 1.15em;
+    height: 1.15em;
 }
 
 /* ============================================================
@@ -35,9 +59,64 @@
     letter-spacing: 0.02em;
 }
 .est-title__glyph {
+    display: inline-flex;
     color: var(--est-accent);
-    font-size: 1.2em;
+    font-size: 1.35em;
     line-height: 1;
+}
+
+/* ============================================================
+ * TABS
+ * ============================================================ */
+.est-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 4px;
+    border: 1px solid var(--est-border);
+    border-radius: 999px;
+    background: var(--est-surface-strong);
+}
+
+.est-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    flex: 1 1 0;
+    padding: 8px 14px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--est-fg);
+    font-size: 0.9em;
+    cursor: pointer;
+    transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+}
+.est-tab:hover {
+    background: var(--est-surface);
+}
+.est-tab[aria-selected="true"] {
+    border-color: var(--est-accent);
+    background: var(--est-accent-soft);
+    color: var(--est-accent);
+    font-weight: 600;
+}
+.est-tab__icon {
+    width: 1.15em;
+    height: 1.15em;
+    flex: 0 0 auto;
+}
+
+.est-panels {
+    display: contents;
+}
+.est-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.est-panel[hidden] {
+    display: none;
 }
 
 .est-intro {
@@ -145,6 +224,54 @@
     background: var(--est-accent-soft);
     color: var(--est-accent);
     font-weight: 600;
+}
+
+/* --- user-defined tags --- */
+.est-chip--custom {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-style: dashed;
+}
+.est-chip--custom[aria-pressed="true"] {
+    border-style: solid;
+}
+.est-chip__remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.15em;
+    height: 1.15em;
+    border-radius: 50%;
+    background: color-mix(in srgb, var(--est-fg) 12%, transparent);
+    font-size: 0.95em;
+    line-height: 1;
+    opacity: 0.65;
+}
+.est-chip__remove:hover {
+    background: color-mix(in srgb, #ff6b6b 45%, transparent);
+    opacity: 1;
+}
+
+.est-chip--add {
+    border-style: dashed;
+    color: var(--est-muted);
+}
+.est-chip--add:hover {
+    color: var(--est-accent);
+}
+
+.est-custom {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+.est-custom__input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.est-custom__ok {
+    flex: 0 0 auto;
 }
 
 /* ============================================================
@@ -372,35 +499,160 @@
 }
 
 /* ============================================================
- * SETTINGS CARD
+ * SETTINGS CARD (Extensions tab) — rounded, pretty card
  * ============================================================ */
+.estate-settings .inline-drawer-header b {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+.estate-settings__mark {
+    display: inline-flex;
+    color: var(--est-accent);
+    font-size: 1.1em;
+}
+
 .estate-settings__card {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 6px 2px 4px;
+    margin-top: 6px;
+    padding: 14px;
+    border: 1px solid var(--est-border);
+    border-radius: 16px;
+    background:
+        linear-gradient(180deg, color-mix(in srgb, var(--est-accent) 9%, transparent) 0%, transparent 22%),
+        var(--est-set-surface);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
     color: var(--est-fg);
 }
 
-.estate-settings__section {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    padding-top: 10px;
-    border-top: 1px solid var(--est-border);
+.estate-settings__intro {
+    margin: 0 0 12px;
+    font-size: 0.84em;
+    line-height: 1.5;
+    color: var(--est-muted);
 }
 
-.estate-settings__heading {
-    margin: 0;
+.estate-settings__primary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 14px;
+    margin: 0 0 14px;
+    border: 1px solid var(--est-accent);
+    border-radius: 999px;
+    background: var(--est-set-accent-soft);
+    color: var(--est-accent);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.08s ease;
+}
+.estate-settings__primary:hover {
+    background: color-mix(in srgb, var(--est-accent) 26%, var(--est-set-surface) 74%);
+}
+.estate-settings__primary:active {
+    transform: scale(0.98);
+}
+
+.estate-settings__row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    margin: 0 0 6px;
+    border: 1px solid var(--est-border);
+    border-radius: 10px;
+    background: var(--est-set-surface-strong);
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+.estate-settings__row:hover {
+    border-color: color-mix(in srgb, var(--est-accent) 40%, var(--est-border) 60%);
+}
+.estate-settings__row--col {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.estate-settings__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.estate-settings__label {
     font-size: 0.9em;
-    letter-spacing: 0.02em;
+    line-height: 1.35;
+    font-weight: 600;
+}
+.estate-settings__desc {
+    font-size: 0.76em;
+    line-height: 1.4;
+    color: var(--est-muted);
+}
+
+.estate-settings__textarea {
+    width: 100%;
+    resize: vertical;
+    min-height: 84px;
+    font-size: 0.84em;
+    line-height: 1.45;
+}
+
+.estate-settings__section {
+    margin-top: 14px;
+}
+.estate-settings__heading {
+    margin: 0 0 8px;
+    font-size: 0.72em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--est-muted);
+}
+
+.estate-settings__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
 }
 
 .estate-settings__reset {
-    align-self: flex-start;
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    padding: 5px 12px;
+    border: 1px solid var(--est-border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--est-fg);
+    font-size: 0.78em;
+    cursor: pointer;
+    transition: border-color 0.15s ease, color 0.15s ease;
+}
+.estate-settings__reset:hover {
+    border-color: var(--est-accent);
+    color: var(--est-accent);
+}
+
+.estate-settings__saved {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78em;
+    font-weight: 600;
+    color: #3fd17a;
+    opacity: 0;
+    transform: translateY(2px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: none;
+}
+.estate-settings__saved--on {
+    opacity: 1;
+    transform: none;
 }
 
 /* ============================================================
@@ -428,12 +680,24 @@
         width: 100%;
         justify-content: center;
     }
+    .est-tab {
+        padding: 7px 10px;
+        font-size: 0.85em;
+    }
+    .est-custom {
+        flex-direction: column;
+        align-items: stretch;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
     .est-chip,
     .est-seg,
-    .est-entry {
+    .est-tab,
+    .est-entry,
+    .estate-settings__row,
+    .estate-settings__primary,
+    .estate-settings__saved {
         transition: none;
     }
 }

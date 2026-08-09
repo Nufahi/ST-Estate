@@ -6,13 +6,12 @@
  * value to the prompt builder or the lorebook writer.
  */
 
-import { SECTIONS, chipIds } from './catalog.js';
+import { MODES, SECTIONS, chipIds, customId, isCustomId } from './catalog.js';
 
 const MODULE_NAME = 'ST-Estate';
 
 export const TARGETS = Object.freeze(['character', 'persona', 'shared']);
 export const BINDINGS = Object.freeze(['chat', 'character', 'persona', 'none']);
-export const LANGUAGES = Object.freeze(['auto', 'en', 'ru']);
 export const DETAILS = Object.freeze(['brief', 'normal', 'rich']);
 export const GRANULARITY = Object.freeze(['single', 'rooms']);
 
@@ -25,18 +24,24 @@ const INSTRUCTION_MAX = 4000;
 const EXTRA_MAX = 2000;
 const PROFILE_ID_MAX = 200;
 
+/** Caps on user-defined tags, so a runaway paste cannot bloat the settings file. */
+export const CUSTOM_TAG_MAX = 60;
+const CUSTOM_TAGS_PER_SECTION = 24;
+
 const DEFAULT_NAME_TEMPLATE = 'Estate - {char}';
 const DEFAULT_INSTRUCTION = '';
 
 const DEFAULTS = Object.freeze({
+    mode: 'home',
     target: 'character',
     picks: {},
+    customTags: {},
     extra: '',
+    placeName: '',
     lorebookName: '',
     createNew: true,
     nameTemplate: DEFAULT_NAME_TEMPLATE,
     bind: 'chat',
-    language: 'auto',
     detail: 'normal',
     granularity: 'single',
     profileId: '',
@@ -77,12 +82,43 @@ function oneOf(value, allowed, fallback) {
     return allowed.includes(value) ? value : fallback;
 }
 
-/** Drop unknown section ids and unknown chip ids, then honour each section cap. */
-function sanitizePicks(value) {
+/**
+ * User-defined tags, stored per section as the text the user actually typed.
+ * Case is preserved for display; `customId()` folds it for identity.
+ */
+function sanitizeCustomTags(value) {
+    const raw = plainObject(value);
+    const output = {};
+    for (const section of SECTIONS) {
+        const list = Array.isArray(raw[section.id]) ? raw[section.id] : [];
+        const kept = [];
+        const seen = new Set();
+        for (const item of list) {
+            if (typeof item !== 'string') continue;
+            const text = stripControlCharacters(item).replace(/\s+/g, ' ').trim().slice(0, CUSTOM_TAG_MAX);
+            if (!text) continue;
+            const id = customId(text);
+            if (seen.has(id)) continue;
+            seen.add(id);
+            kept.push(text);
+            if (kept.length >= CUSTOM_TAGS_PER_SECTION) break;
+        }
+        if (kept.length) output[section.id] = kept;
+    }
+    return output;
+}
+
+/**
+ * Drop unknown section ids and unknown chip ids, then honour each section cap.
+ * A custom id survives only while its tag still exists in `customTags`.
+ */
+function sanitizePicks(value, customTags) {
     const raw = plainObject(value);
     const output = {};
     for (const section of SECTIONS) {
         const valid = new Set(chipIds(section.id));
+        for (const text of customTags[section.id] || []) valid.add(customId(text));
+
         const chosen = Array.isArray(raw[section.id]) ? raw[section.id] : [];
         const unique = [];
         for (const id of chosen) {
@@ -94,6 +130,68 @@ function sanitizePicks(value) {
     }
     return output;
 }
+
+/**
+ * Text of every custom tag, keyed by id — what `promptsFor` and `labelsFor`
+ * need to turn a stored id back into words.
+ *
+ * @param {object} settings
+ * @param {string} sectionId
+ * @returns {Record<string, string>}
+ */
+export function customLabels(settings, sectionId) {
+    const labels = {};
+    for (const text of settings?.customTags?.[sectionId] || []) labels[customId(text)] = text;
+    return labels;
+}
+
+/**
+ * Add a user-defined tag to a section and select it.
+ *
+ * @param {object} settings
+ * @param {string} sectionId
+ * @param {string} text
+ * @returns {{ok: true, id: string, text: string, existed: boolean} | {ok: false, reason: 'empty'|'full'}}
+ */
+export function addCustomTag(settings, sectionId, text) {
+    const clean = stripControlCharacters(String(text ?? '')).replace(/\s+/g, ' ').trim().slice(0, CUSTOM_TAG_MAX);
+    if (!clean) return { ok: false, reason: 'empty' };
+
+    if (!settings.customTags[sectionId]) settings.customTags[sectionId] = [];
+    const list = settings.customTags[sectionId];
+    const id = customId(clean);
+
+    const existing = list.find(item => customId(item) === id);
+    if (existing) return { ok: true, id, text: existing, existed: true };
+
+    if (list.length >= CUSTOM_TAGS_PER_SECTION) return { ok: false, reason: 'full' };
+    list.push(clean);
+    return { ok: true, id, text: clean, existed: false };
+}
+
+/**
+ * Forget a user-defined tag and deselect it everywhere.
+ *
+ * @param {object} settings
+ * @param {string} sectionId
+ * @param {string} id
+ */
+export function removeCustomTag(settings, sectionId, id) {
+    const list = settings.customTags[sectionId];
+    if (Array.isArray(list)) {
+        settings.customTags[sectionId] = list.filter(item => customId(item) !== id);
+        if (!settings.customTags[sectionId].length) delete settings.customTags[sectionId];
+    }
+    const picked = settings.picks[sectionId];
+    if (Array.isArray(picked)) settings.picks[sectionId] = picked.filter(item => item !== id);
+}
+
+/** @returns {boolean} whether the section has room for another custom tag. */
+export function customTagsFull(settings, sectionId) {
+    return (settings?.customTags?.[sectionId]?.length || 0) >= CUSTOM_TAGS_PER_SECTION;
+}
+
+export { isCustomId };
 
 function normalizeProfileId(value) {
     if (typeof value !== 'string') return '';
@@ -110,15 +208,18 @@ export function getSettings() {
     if (cached && current === cached) return cached;
 
     const raw = plainObject(current);
+    const customTags = sanitizeCustomTags(raw.customTags);
     cached = {
+        mode: oneOf(raw.mode, MODES, DEFAULTS.mode),
         target: oneOf(raw.target, TARGETS, DEFAULTS.target),
-        picks: sanitizePicks(raw.picks),
+        picks: sanitizePicks(raw.picks, customTags),
+        customTags,
         extra: normalizeText(raw.extra, EXTRA_MAX, DEFAULTS.extra),
+        placeName: normalizeText(raw.placeName, NAME_MAX * 2, DEFAULTS.placeName),
         lorebookName: normalizeText(raw.lorebookName, NAME_MAX * 2, DEFAULTS.lorebookName),
         createNew: typeof raw.createNew === 'boolean' ? raw.createNew : DEFAULTS.createNew,
         nameTemplate: normalizeText(raw.nameTemplate, NAME_MAX * 2, DEFAULT_NAME_TEMPLATE),
         bind: oneOf(raw.bind, BINDINGS, DEFAULTS.bind),
-        language: oneOf(raw.language, LANGUAGES, DEFAULTS.language),
         detail: oneOf(raw.detail, DETAILS, DEFAULTS.detail),
         granularity: oneOf(raw.granularity, GRANULARITY, DEFAULTS.granularity),
         profileId: normalizeProfileId(raw.profileId),

@@ -7,6 +7,7 @@
  */
 
 import { button, node, textarea } from './dom.js';
+import { buildingIcon, houseIcon } from './icon.js';
 import { t } from './i18n.js';
 import { compileKeys, describeKey } from './keys.js';
 
@@ -14,6 +15,7 @@ const KIND_LABEL = {
     stem: 'keyStem',
     exact: 'keyExact',
     suffix: 'keySuffix',
+    group: 'keyGroup',
     plain: 'keyPlain',
 };
 
@@ -171,7 +173,7 @@ function buildEntryCard(entry, index, onChange) {
  * Show the review dialog.
  *
  * @param {object[]} entries Draft entries straight from the parser.
- * @param {{book: string, isNew: boolean}} destination
+ * @param {{book: string, isNew: boolean, mode?: 'home'|'place'}} destination
  * @param {(entries: object[]) => Promise<boolean>} onWrite
  * @returns {Promise<boolean>} whether entries were written
  */
@@ -182,7 +184,9 @@ export async function openPreview(entries, destination, onWrite) {
     const title = node('div', 'est-title');
     const heading = node('h3', '', t('previewTitle'));
     heading.id = 'estate_preview_title';
-    title.append(node('span', 'est-title__glyph', '⌂'), heading);
+    const glyph = node('span', 'est-title__glyph');
+    glyph.appendChild(destination.mode === 'place' ? buildingIcon() : houseIcon());
+    title.append(glyph, heading);
     root.append(title, node('p', 'est-intro', t('previewIntro')));
 
     // Declared up front because the summary updater enables and disables it.

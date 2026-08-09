@@ -1,32 +1,46 @@
 <div class="estate-settings">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b>⌂ Estate</b>
+            <b><span class="estate-settings__mark" data-estate-icon="house"></span> Estate</b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content" style="display: none;">
             <div class="estate-settings__card">
-                <p class="est-hint" data-estate-i18n="settingsIntro">Defaults for the Estate dialog.</p>
+                <p class="estate-settings__intro" data-estate-i18n="settingsIntro">Defaults for the Estate dialog.</p>
+
+                <button id="estate_open" type="button" class="estate-settings__primary">
+                    <span class="estate-settings__mark" data-estate-icon="house"></span>
+                    <span data-estate-i18n="settingsOpen">Open Estate</span>
+                </button>
 
                 <section class="estate-settings__section">
                     <h4 class="estate-settings__heading" data-estate-i18n="settingsHeading">Defaults</h4>
 
-                    <label class="est-field" for="estate_name_template">
-                        <span class="est-field__label" data-estate-i18n="settingsNameTemplate">New lorebook name</span>
+                    <div class="estate-settings__row estate-settings__row--col">
+                        <label class="estate-settings__text" for="estate_name_template">
+                            <span class="estate-settings__label" data-estate-i18n="settingsNameTemplate">New lorebook name</span>
+                            <span class="estate-settings__desc" data-estate-i18n="nameTemplateHint">Placeholders: {char}, {user}, {chat}.</span>
+                        </label>
                         <input id="estate_name_template" type="text" class="text_pole" maxlength="120">
-                        <span class="est-hint" data-estate-i18n="nameTemplateHint">Placeholders: {char}, {user}, {chat}.</span>
-                    </label>
+                    </div>
 
-                    <label class="est-field" for="estate_instruction">
-                        <span class="est-field__label" data-estate-i18n="settingsInstruction">Extra instruction</span>
-                        <textarea id="estate_instruction" class="text_pole est-textarea" rows="4"></textarea>
-                        <span class="est-hint" data-estate-i18n="settingsInstructionDesc">Appended to every generation.</span>
-                    </label>
-
-                    <button id="estate_reset" type="button" class="menu_button estate-settings__reset">
-                        <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
-                        <span data-estate-i18n="settingsReset">Reset</span>
-                    </button>
+                    <div class="estate-settings__row estate-settings__row--col">
+                        <label class="estate-settings__text" for="estate_instruction">
+                            <span class="estate-settings__label" data-estate-i18n="settingsInstruction">Extra instruction</span>
+                            <span class="estate-settings__desc" data-estate-i18n="settingsInstructionDesc">Appended to every generation.</span>
+                        </label>
+                        <textarea id="estate_instruction" class="text_pole estate-settings__textarea" rows="4"></textarea>
+                        <div class="estate-settings__foot">
+                            <span class="estate-settings__saved" id="estate_saved" aria-live="polite">
+                                <i class="fa-solid fa-circle-check" aria-hidden="true"></i>
+                                <span data-estate-i18n="settingsSaved">Saved.</span>
+                            </span>
+                            <button id="estate_reset" type="button" class="estate-settings__reset">
+                                <i class="fa-solid fa-rotate-left" aria-hidden="true"></i>
+                                <span data-estate-i18n="settingsReset">Reset</span>
+                            </button>
+                        </div>
+                    </div>
                 </section>
             </div>
         </div>

@@ -6,18 +6,21 @@
  * keys.js compiles those into patterns that are correct by construction.
  */
 
-import { SECTIONS, promptsFor } from './catalog.js';
-import { targetWords } from './settings.js';
+import { SPLIT_SECTION, sectionsFor } from './catalog.js';
+import { promptsFor } from './catalog.js';
+import { customLabels, targetWords } from './settings.js';
 
 const MAX_ENTRIES = 12;
-const MAX_KEYS_PER_ENTRY = 14;
+
+/** Bilingual keying doubles the list, so the cap has to allow for both scripts. */
+const MAX_KEYS_PER_ENTRY = 24;
 
 /** Reply contract handed to the model verbatim. */
 const SCHEMA = `{
   "entries": [
     {
       "title": "short entry title, 2-5 words",
-      "room": "which room or aspect this entry covers, or \\"whole\\" for the entire home",
+      "room": "which room, zone or aspect this entry covers, or \\"whole\\" for the entire place",
       "content": "the description itself",
       "visual": "comma-separated visual tags: materials, colours, light, notable objects",
       "keys": [
@@ -56,17 +59,33 @@ Give a stem, not a full word: "кварти", not "квартира". A stem mus
 least 4 characters, otherwise use exact.
 A value is always a single word with no spaces — the only exception is
 "proper", which may contain spaces.
-Set "lang" to "ru" or "en" to match the script the value is written in.`;
+Set "lang" to "ru" or "en" to match the script the value is written in.
+
+BOTH LANGUAGES, ALWAYS. The chat may be in English or in Russian, and the
+entry has to fire either way. For every concept you key on, give the English
+keyword AND its Russian equivalent as two separate entries in the list:
+
+  { "mode": "stem", "lang": "en", "value": "kitchen" },
+  { "mode": "stem", "lang": "ru", "value": "кухн" }
+
+This is not optional and it is the mistake that gets made most often: a list
+containing only English keywords is a failed reply. Roughly half of your
+keywords must be Russian. Proper nouns are the one exception — a name stays
+in whatever script it is written in.`;
 
 function clean(value) {
     return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
 /** Human-readable brief assembled from the tag picks and the free-form field. */
-function buildBrief(settings) {
+function buildBrief(settings, mode) {
     const lines = [];
-    for (const section of SECTIONS) {
-        const fragments = promptsFor(section.id, settings.picks?.[section.id]);
+    for (const section of sectionsFor(mode)) {
+        const fragments = promptsFor(
+            section.id,
+            settings.picks?.[section.id],
+            customLabels(settings, section.id),
+        );
         if (fragments.length) lines.push(`${section.en}: ${fragments.join('; ')}`);
     }
     const extra = clean(settings.extra);
@@ -74,10 +93,18 @@ function buildBrief(settings) {
     return lines.join('\n');
 }
 
-/** Who lives here, in the words the model will use. */
-function buildOccupancy(ctx, settings) {
+/** Who lives here, or what the building is, in the words the model will use. */
+function buildOccupancy(ctx, settings, mode) {
     const charName = clean(ctx.name2) || 'the character';
     const userName = clean(ctx.name1) || 'the user';
+
+    if (mode === 'place') {
+        const name = clean(settings.placeName);
+        return name
+            ? { subject: name, line: `Describe a building called "${name}". It is a location in the world of this roleplay, not anybody's home.` }
+            : { subject: 'the building', line: 'Describe a building: a location in the world of this roleplay, not anybody\'s home.' };
+    }
+
     if (settings.target === 'persona') {
         return { subject: userName, line: `This is the home of ${userName}.` };
     }
@@ -85,19 +112,6 @@ function buildOccupancy(ctx, settings) {
         return { subject: `${charName} & ${userName}`, line: `This is the shared home of ${charName} and ${userName}. Show whose habits shaped which corner.` };
     }
     return { subject: charName, line: `This is the home of ${charName}.` };
-}
-
-/** Resolve `auto` into the language the chat is actually written in. */
-function resolveLanguage(ctx, settings) {
-    if (settings.language === 'ru' || settings.language === 'en') return settings.language;
-    const sample = (ctx.chat || [])
-        .filter(message => message && !message.is_system && typeof message.mes === 'string')
-        .slice(-6)
-        .map(message => message.mes)
-        .join(' ');
-    if (/[А-Яа-яЁё]/.test(sample)) return 'ru';
-    const description = clean(ctx.getCharacterCardFields?.()?.description || '');
-    return /[А-Яа-яЁё]/.test(description) ? 'ru' : 'en';
 }
 
 /** Only the context the user asked for, trimmed to something sane. */
@@ -128,35 +142,46 @@ function buildContext(ctx, settings) {
  * @param {object} settings
  * @param {{repair?: string}} [options] `repair` carries the parser error back
  *        to the model on the retry pass.
- * @returns {{prompt: Array<{role: string, content: string}>, responseLength: number, language: 'en'|'ru'}}
+ * @returns {{prompt: Array<{role: string, content: string}>, responseLength: number, mode: 'home'|'place'}}
  */
 export function buildRequest(settings, options = {}) {
     const ctx = SillyTavern.getContext();
-    const language = resolveLanguage(ctx, settings);
+    const mode = settings.mode === 'place' ? 'place' : 'home';
     const words = targetWords(settings);
-    const occupancy = buildOccupancy(ctx, settings);
-    const brief = buildBrief(settings);
+    const occupancy = buildOccupancy(ctx, settings, mode);
+    const brief = buildBrief(settings, mode);
     const context = buildContext(ctx, settings);
 
+    const splitId = SPLIT_SECTION[mode];
     const perRoom = settings.granularity === 'rooms';
-    const rooms = promptsFor('rooms', settings.picks?.rooms);
-    const entryPlan = perRoom && rooms.length
-        ? `Write one entry per listed room: ${rooms.join(', ')}. Add one short entry titled for the home as a whole that covers the building, the approach and the overall impression.`
-        : 'Write a single entry covering the whole home. If the place has clearly distinct areas, give each its own paragraph inside that one entry.';
+    const parts = promptsFor(splitId, settings.picks?.[splitId], customLabels(settings, splitId));
+    const unit = mode === 'place' ? 'zone' : 'room';
 
-    const languageRule = language === 'ru'
-        ? 'Write "title", "content" and "visual" in Russian. Keyword values may be Russian or English — give both where a word is likely to appear in either.'
-        : 'Write "title", "content" and "visual" in English.';
+    const entryPlan = perRoom && parts.length
+        ? `Write one entry per listed ${unit}: ${parts.join(', ')}. Add one short entry titled for the ${mode === 'place' ? 'building' : 'home'} as a whole that covers the structure, the approach and the overall impression.`
+        : `Write a single entry covering the whole ${mode === 'place' ? 'building' : 'home'}. If the place has clearly distinct areas, give each its own paragraph inside that one entry.`;
+
+    // Entries are always English so image prompts and cross-language chats both
+    // work; keys are always bilingual so a Russian chat still triggers them.
+    const languageRule = 'Write "title", "content" and "visual" in English, always, whatever language the chat uses.';
+
+    const subject = mode === 'place'
+        ? 'You are a set designer writing reference material for a roleplay. You describe the buildings a story passes through.'
+        : 'You are a set designer writing reference material for a roleplay. You describe where people live.';
+
+    const evidence = mode === 'place'
+        ? '- The building is evidence of the people who use it: who built it, who maintains it, who has stopped bothering. Show wear where hands and feet actually go.'
+        : '- The home is evidence of a person. Every choice should say something about who lives there — what they can afford, what they care about, what they have given up on.';
 
     const system = [
-        'You are a set designer writing reference material for a roleplay. You describe where people live.',
+        subject,
         '',
         'You will receive a brief of tags and produce lorebook entries as JSON.',
         '',
         'HOW TO WRITE THE DESCRIPTION',
         `- Around ${words} words per entry. Prose, not bullet points.`,
         '- Concrete and specific. Name materials, worn spots, what is on the table, what does not work.',
-        '- The home is evidence of a person. Every choice should say something about who lives there — what they can afford, what they care about, what they have given up on.',
+        evidence,
         '- No praise, no atmosphere adjectives doing the work of detail. "A sagging corduroy sofa the colour of weak tea" beats "a cosy inviting sofa".',
         '- Present tense, no second person, no addressing the reader.',
         '- Do not invent plot, events or other people. Describe the place.',
@@ -167,7 +192,7 @@ export function buildRequest(settings, options = {}) {
         '- Example: "exposed red brick, black steel window frames, worn oak floor, brass floor lamp, low winter sun, dust in the light, olive velvet sofa".',
         '',
         entryPlan,
-        `Produce at most ${MAX_ENTRIES} entries. Between 4 and ${MAX_KEYS_PER_ENTRY} keywords each.`,
+        `Produce at most ${MAX_ENTRIES} entries. Between 8 and ${MAX_KEYS_PER_ENTRY} keywords each.`,
         languageRule,
         '',
         KEY_RULES,
@@ -178,6 +203,14 @@ export function buildRequest(settings, options = {}) {
     ].join('\n');
 
     const userParts = [occupancy.line];
+
+    // A named place is how the chat will refer to it, so the name has to be a
+    // key or the entry never fires when someone says it by name.
+    const placeName = mode === 'place' ? clean(settings.placeName) : '';
+    if (placeName) {
+        userParts.push(`Include { "mode": "proper", "value": "${placeName}" } in the keys of every entry.`);
+    }
+
     if (brief) userParts.push(`BRIEF\n${brief}`);
     if (context) userParts.push(context);
 
@@ -191,7 +224,7 @@ export function buildRequest(settings, options = {}) {
         );
     }
 
-    const entryCount = perRoom && rooms.length ? Math.min(rooms.length + 1, MAX_ENTRIES) : 1;
+    const entryCount = perRoom && parts.length ? Math.min(parts.length + 1, MAX_ENTRIES) : 1;
     const responseLength = Math.min(16384, Math.max(1024, Math.ceil(words * entryCount * 2.6) + 512));
 
     return {
@@ -200,7 +233,7 @@ export function buildRequest(settings, options = {}) {
             { role: 'user', content: userParts.join('\n\n') },
         ],
         responseLength,
-        language,
+        mode,
     };
 }
 

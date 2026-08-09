@@ -118,11 +118,14 @@ export function compileKey(spec) {
             return { ok: false, reason: 'notLatin', input: sample };
         }
         const tooShort = values.some(value => value.length <= SHORT_WORD_LIMIT);
-        if (tooShort && mode === 'stem') {
+        // `group` promises the model that every member still matches all its
+        // forms, so it grows the same tail a stem does. Without this, a group
+        // of "doorway" would miss "doorways" while the Russian side matched it.
+        if (tooShort && (mode === 'stem' || mode === 'group')) {
             // A bare Latin stem has no right boundary, so a 3-letter stem would
             // fire on half the dictionary. Force it back to an exact match.
             pattern = `\\b${body}\\b`;
-        } else if (mode === 'stem') {
+        } else if (mode === 'stem' || mode === 'group') {
             pattern = `\\b${body}[A-Za-z]*\\b`;
         } else if (mode === 'suffix') {
             const suffixes = (Array.isArray(raw.suffixes) ? raw.suffixes : ['s'])
@@ -223,7 +226,7 @@ export function compileKeys(specs, options = {}) {
  * Returns a `{ text, kind }` pair so the caller can localise the kind.
  *
  * @param {string} key
- * @returns {{text: string, kind: 'plain'|'stem'|'exact'|'suffix'}}
+ * @returns {{text: string, kind: 'plain'|'stem'|'exact'|'suffix'|'group'}}
  */
 export function describeKey(key) {
     const text = String(key ?? '');
@@ -259,5 +262,8 @@ export function describeKey(key) {
     if (suffixes.length) {
         return { text: `${label} (+${suffixes.join('/')})`, kind: 'suffix' };
     }
+    // Several alternatives read as a group regardless of how they were declared;
+    // calling that "exact word" in the preview was actively misleading.
+    if (words.length > 1) return { text: label, kind: 'group' };
     return { text: label, kind: isStem ? 'stem' : 'exact' };
 }

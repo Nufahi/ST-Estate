@@ -4,9 +4,39 @@
  * Every tag carries an English `prompt` string, which is what the model
  * actually receives. The `en` / `ru` labels are only for the UI, so switching
  * the interface language never changes the generation result.
+ *
+ * Two catalogs live here: `home` describes where someone lives, `place`
+ * describes any other building. Their section ids never collide, so the two
+ * tabs keep independent selections.
  */
 
 const CHIP = (id, en, ru, prompt) => Object.freeze({ id, en, ru, prompt });
+
+/** The two tag boards. */
+export const MODES = Object.freeze(['home', 'place']);
+
+/**
+ * User-defined tags are stored under this prefix so they can never be mistaken
+ * for a catalog id, and so a stale custom tag simply disappears instead of
+ * silently selecting some unrelated chip.
+ */
+export const CUSTOM_PREFIX = 'custom:';
+
+/** @returns {boolean} whether an id belongs to a user-defined tag. */
+export function isCustomId(id) {
+    return typeof id === 'string' && id.startsWith(CUSTOM_PREFIX);
+}
+
+/**
+ * Build the stable id of a user-defined tag from its text. Case and inner
+ * whitespace are folded so "Red Door" and "red  door" stay one tag.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+export function customId(text) {
+    return CUSTOM_PREFIX + String(text ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
 
 /** Dwelling type — the physical shell of the home. */
 export const DWELLING = Object.freeze([
@@ -182,11 +212,140 @@ export const FEATURES = Object.freeze([
     CHIP('noise', 'Constant noise', 'Постоянный шум', 'a constant background sound'),
 ]);
 
+/** Kind of building — the places tab equivalent of DWELLING. */
+export const VENUE = Object.freeze([
+    CHIP('church', 'Church', 'Церковь', 'a church or cathedral'),
+    CHIP('chapel', 'Chapel', 'Часовня', 'a small roadside chapel'),
+    CHIP('temple', 'Temple', 'Храм', 'a temple of a non-Christian faith'),
+    CHIP('monastery', 'Monastery', 'Монастырь', 'a working monastery'),
+    CHIP('townhall', 'Town hall', 'Ратуша', 'a town hall or civic council building'),
+    CHIP('court', 'Courthouse', 'Суд', 'a courthouse'),
+    CHIP('palace', 'Palace', 'Дворец', 'a ruler\'s palace'),
+    CHIP('castle', 'Castle', 'Замок', 'a fortified castle'),
+    CHIP('tavern', 'Tavern', 'Таверна', 'a tavern or public house'),
+    CHIP('inn', 'Inn', 'Постоялый двор', 'an inn with rooms above the common floor'),
+    CHIP('bar', 'Bar', 'Бар', 'a late-night bar'),
+    CHIP('cafe', 'Cafe', 'Кафе', 'a cafe'),
+    CHIP('restaurant', 'Restaurant', 'Ресторан', 'a restaurant'),
+    CHIP('shop', 'Shop', 'Лавка', 'a small shop or store'),
+    CHIP('market', 'Market', 'Рынок', 'a covered market or bazaar'),
+    CHIP('smithy', 'Smithy', 'Кузница', 'a blacksmith\'s forge'),
+    CHIP('workshop_v', 'Workshop', 'Мастерская', 'an artisan\'s workshop'),
+    CHIP('library_v', 'Library', 'Библиотека', 'a public or private library'),
+    CHIP('school', 'School', 'Школа', 'a school'),
+    CHIP('university', 'University', 'Университет', 'a university hall'),
+    CHIP('museum', 'Museum', 'Музей', 'a museum'),
+    CHIP('theatre', 'Theatre', 'Театр', 'a theatre'),
+    CHIP('hospital', 'Hospital', 'Больница', 'a hospital or infirmary'),
+    CHIP('apothecary', 'Apothecary', 'Аптека', 'an apothecary or pharmacy'),
+    CHIP('bathhouse', 'Bathhouse', 'Баня', 'a public bathhouse'),
+    CHIP('barracks_v', 'Barracks', 'Казармы', 'military barracks'),
+    CHIP('prison', 'Prison', 'Тюрьма', 'a prison'),
+    CHIP('guardpost', 'Guard post', 'Караулка', 'a guard post or watchhouse'),
+    CHIP('station', 'Station', 'Вокзал', 'a railway station'),
+    CHIP('port', 'Port', 'Порт', 'a working port and its quays'),
+    CHIP('warehouse', 'Warehouse', 'Склад', 'a storage warehouse'),
+    CHIP('factory', 'Factory', 'Завод', 'a factory floor'),
+    CHIP('mine', 'Mine', 'Шахта', 'a mine and its head works'),
+    CHIP('farm', 'Farm', 'Ферма', 'a working farm'),
+    CHIP('mill', 'Mill', 'Мельница', 'a mill'),
+    CHIP('lighthouse', 'Lighthouse', 'Маяк', 'a lighthouse'),
+    CHIP('observatory', 'Observatory', 'Обсерватория', 'an observatory'),
+    CHIP('lab_v', 'Laboratory', 'Лаборатория', 'a research laboratory'),
+    CHIP('office', 'Office', 'Офис', 'a corporate office floor'),
+    CHIP('bank', 'Bank', 'Банк', 'a bank'),
+    CHIP('brothel', 'Brothel', 'Бордель', 'a brothel'),
+    CHIP('arena', 'Arena', 'Арена', 'a fighting arena'),
+    CHIP('cemetery', 'Cemetery', 'Кладбище', 'a cemetery and its gatehouse'),
+    CHIP('ruin', 'Ruin', 'Руины', 'the ruin of a building nobody maintains'),
+]);
+
+/** How large the place is — changes how it must be described. */
+export const SCALE = Object.freeze([
+    CHIP('cramped', 'Cramped', 'Тесное', 'cramped: one room, everything within arm\'s reach'),
+    CHIP('modest_s', 'Modest', 'Небольшое', 'modest: a handful of rooms, takes a minute to cross'),
+    CHIP('large', 'Large', 'Большое', 'large: several floors or wings, easy to lose someone in'),
+    CHIP('vast', 'Vast', 'Огромное', 'vast: monumental scale, the far end is out of sight'),
+    CHIP('labyrinth', 'Labyrinthine', 'Лабиринт', 'labyrinthine: nobody knows the whole plan, including the staff'),
+]);
+
+/** How busy it is — the single strongest lever on how a place feels. */
+export const BUSY = Object.freeze([
+    CHIP('abandoned', 'Abandoned', 'Заброшено', 'abandoned: nobody has been here in a long time'),
+    CHIP('empty', 'Empty', 'Пусто', 'empty right now, though clearly still in use'),
+    CHIP('quiet', 'Quiet', 'Тихо', 'quiet: a few people, voices kept low'),
+    CHIP('working', 'Working', 'Рабочий день', 'a normal working day, steady traffic of people'),
+    CHIP('crowded', 'Crowded', 'Людно', 'crowded: full, loud, you queue for everything'),
+    CHIP('heaving', 'Heaving', 'Битком', 'heaving: shoulder to shoulder, barely passable'),
+]);
+
+/** Zones — the places-tab equivalent of ROOMS. */
+export const ZONES = Object.freeze([
+    CHIP('approach', 'Approach', 'Подход', 'the approach and the street outside'),
+    CHIP('facade', 'Facade', 'Фасад', 'the facade and the entrance'),
+    CHIP('threshold', 'Entrance hall', 'Вход', 'the entrance hall or porch'),
+    CHIP('main', 'Main hall', 'Главный зал', 'the main hall — the room the building exists for'),
+    CHIP('counter', 'Counter', 'Стойка', 'the counter, bar or reception'),
+    CHIP('seating', 'Seating', 'Зал для гостей', 'where people sit and stay'),
+    CHIP('backroom', 'Back room', 'Задняя комната', 'the back room the public does not see'),
+    CHIP('kitchen_z', 'Kitchen', 'Кухня', 'the kitchen or preparation area'),
+    CHIP('storage', 'Storage', 'Кладовая', 'storage, stockroom or pantry'),
+    CHIP('cellar', 'Cellar', 'Погреб', 'the cellar or undercroft'),
+    CHIP('upstairs', 'Upper floor', 'Верхний этаж', 'the upper floor'),
+    CHIP('office_z', 'Office', 'Кабинет', 'the office of whoever runs the place'),
+    CHIP('quarters', 'Private quarters', 'Жилые комнаты', 'the private quarters of those who live on site'),
+    CHIP('yard', 'Yard', 'Двор', 'the yard, garden or grounds'),
+    CHIP('roof', 'Roof', 'Крыша', 'the roof and what can be seen from it'),
+    CHIP('hidden_z', 'Hidden part', 'Скрытая часть', 'the part of the building that is kept from visitors'),
+]);
+
+/** Who runs the place and how it sits in the world. */
+export const ROLE = Object.freeze([
+    CHIP('public', 'Open to all', 'Открыто всем', 'open to the public, anyone may walk in'),
+    CHIP('members', 'Members only', 'Только для своих', 'members only, strangers are noticed at once'),
+    CHIP('official', 'Official', 'Официальное', 'an official institution with rules and paperwork'),
+    CHIP('sacred', 'Sacred', 'Священное', 'a sacred place with observances people keep'),
+    CHIP('criminal', 'Criminal', 'Криминал', 'a front for criminal business'),
+    CHIP('failing', 'Failing', 'Загибается', 'failing: fewer visitors every year, debts mounting'),
+    CHIP('thriving', 'Thriving', 'Процветает', 'thriving: money coming in, recently expanded'),
+    CHIP('contested', 'Contested', 'Спорное', 'contested: two parties claim it and both are present'),
+    CHIP('landmark', 'Landmark', 'Достопримечательность', 'a landmark everyone in the area navigates by'),
+    CHIP('forgotten', 'Forgotten', 'Забытое', 'forgotten: on no map, remembered by few'),
+]);
+
+/** Signature details specific to buildings rather than homes. */
+export const VENUE_FEATURES = Object.freeze([
+    CHIP('bells', 'Bells', 'Колокола', 'bells that mark the hours'),
+    CHIP('organ', 'Organ', 'Орган', 'a pipe organ'),
+    CHIP('stainedglass', 'Stained glass', 'Витражи', 'stained glass windows'),
+    CHIP('vaults', 'Vaulted ceiling', 'Своды', 'a high vaulted ceiling'),
+    CHIP('columns', 'Columns', 'Колонны', 'a colonnade of stone columns'),
+    CHIP('frescoes', 'Frescoes', 'Фрески', 'frescoes or murals on the walls'),
+    CHIP('statue', 'Statue', 'Статуя', 'a statue that dominates the space'),
+    CHIP('clock', 'Clock', 'Часы', 'a large public clock'),
+    CHIP('hearth_v', 'Great hearth', 'Очаг', 'a great open hearth'),
+    CHIP('longbar', 'Long bar', 'Барная стойка', 'a long bar worn smooth by elbows'),
+    CHIP('stage', 'Stage', 'Сцена', 'a stage or performance platform'),
+    CHIP('gallery', 'Gallery', 'Галерея', 'an upper gallery overlooking the main floor'),
+    CHIP('crypt', 'Crypt', 'Крипта', 'a crypt beneath the floor'),
+    CHIP('well', 'Well', 'Колодец', 'a well or fountain'),
+    CHIP('archive', 'Archive', 'Архив', 'shelves of records and ledgers'),
+    CHIP('cells', 'Cells', 'Камеры', 'holding cells'),
+    CHIP('machinery', 'Machinery', 'Механизмы', 'working machinery nobody can talk over'),
+    CHIP('notice', 'Notice board', 'Доска объявлений', 'a notice board people actually read'),
+    CHIP('guards', 'Guards', 'Охрана', 'guards posted at the door'),
+    CHIP('animals', 'Animals', 'Животные', 'animals kept on the premises'),
+    CHIP('smell_v', 'Signature smell', 'Свой запах', 'a smell the building is known by'),
+    CHIP('noise_v', 'Constant noise', 'Постоянный шум', 'a constant background sound'),
+    CHIP('damage', 'Old damage', 'Старые повреждения', 'damage from an event everyone still remembers'),
+    CHIP('secretway', 'Secret way', 'Тайный ход', 'a way in or out that is not on any plan'),
+]);
+
 /**
- * The full section list the housing tab renders, in order.
+ * The housing board, in render order.
  * `multi` sections allow several picks; the rest are single-choice.
  */
-export const SECTIONS = Object.freeze([
+export const HOME_SECTIONS = Object.freeze([
     Object.freeze({ id: 'dwelling', en: 'Dwelling', ru: 'Тип жилья', chips: DWELLING, multi: false }),
     Object.freeze({ id: 'style', en: 'Style', ru: 'Стиль', chips: STYLE, multi: true, max: 3 }),
     Object.freeze({ id: 'wealth', en: 'Means', ru: 'Достаток', chips: WEALTH, multi: false }),
@@ -198,11 +357,69 @@ export const SECTIONS = Object.freeze([
     Object.freeze({ id: 'features', en: 'Signature features', ru: 'Особенности', chips: FEATURES, multi: true, max: 8 }),
 ]);
 
+/**
+ * The places board. Style, era, palette, light and condition are shared with
+ * housing but kept under their own ids, so picking a palette for a tavern
+ * never disturbs the one chosen for someone's flat.
+ */
+export const PLACE_SECTIONS = Object.freeze([
+    Object.freeze({ id: 'venue', en: 'Building', ru: 'Тип здания', chips: VENUE, multi: false }),
+    Object.freeze({ id: 'venue_role', en: 'Standing', ru: 'Положение', chips: ROLE, multi: true, max: 3 }),
+    Object.freeze({ id: 'venue_scale', en: 'Scale', ru: 'Масштаб', chips: SCALE, multi: false }),
+    Object.freeze({ id: 'venue_busy', en: 'How busy', ru: 'Людность', chips: BUSY, multi: false }),
+    Object.freeze({ id: 'venue_style', en: 'Style', ru: 'Стиль', chips: STYLE, multi: true, max: 3 }),
+    Object.freeze({ id: 'venue_condition', en: 'Condition', ru: 'Состояние', chips: CONDITION, multi: false }),
+    Object.freeze({ id: 'venue_era', en: 'Era', ru: 'Эпоха', chips: ERA, multi: false }),
+    Object.freeze({ id: 'venue_palette', en: 'Palette', ru: 'Палитра', chips: PALETTE, multi: true, max: 2 }),
+    Object.freeze({ id: 'venue_light', en: 'Light', ru: 'Свет', chips: LIGHT, multi: true, max: 2 }),
+    Object.freeze({ id: 'zones', en: 'Zones to cover', ru: 'Что описать', chips: ZONES, multi: true, max: 8 }),
+    Object.freeze({ id: 'venue_features', en: 'Signature features', ru: 'Особенности', chips: VENUE_FEATURES, multi: true, max: 8 }),
+]);
+
+/** @type {Readonly<Record<'home'|'place', ReadonlyArray<object>>>} */
+export const BOARDS = Object.freeze({ home: HOME_SECTIONS, place: PLACE_SECTIONS });
+
+/** Which section holds the per-entry subdivisions, per board. */
+export const SPLIT_SECTION = Object.freeze({ home: 'rooms', place: 'zones' });
+
+/** Every section across both boards, which is what settings sanitising walks. */
+export const SECTIONS = Object.freeze([...HOME_SECTIONS, ...PLACE_SECTIONS]);
+
 const SECTION_BY_ID = new Map(SECTIONS.map(section => [section.id, section]));
 
-/** @returns {string[]} every valid chip id of a section. */
+/**
+ * @param {'home'|'place'} mode
+ * @returns {ReadonlyArray<object>} the sections that board renders.
+ */
+export function sectionsFor(mode) {
+    return BOARDS[mode] || HOME_SECTIONS;
+}
+
+/** @returns {object|undefined} one section by id, from either board. */
+export function sectionById(sectionId) {
+    return SECTION_BY_ID.get(sectionId);
+}
+
+/** @returns {boolean} whether a section accepts user-defined tags. */
+export function allowsCustom(sectionId) {
+    return SECTION_BY_ID.has(sectionId);
+}
+
+/** @returns {string[]} every valid catalog chip id of a section. */
 export function chipIds(sectionId) {
     return (SECTION_BY_ID.get(sectionId)?.chips || []).map(chip => chip.id);
+}
+
+/**
+ * The text a user-defined tag contributes, recovered from its id. Custom tags
+ * carry no separate prompt: what the user typed is what the model receives.
+ *
+ * @param {string} id
+ * @param {Record<string, string>} [labels] original casing, keyed by id
+ * @returns {string}
+ */
+function customText(id, labels = {}) {
+    return labels[id] || id.slice(CUSTOM_PREFIX.length);
 }
 
 /**
@@ -211,13 +428,16 @@ export function chipIds(sectionId) {
  *
  * @param {string} sectionId
  * @param {string[]} ids
+ * @param {Record<string, string>} [customLabels]
  * @returns {string[]}
  */
-export function promptsFor(sectionId, ids) {
+export function promptsFor(sectionId, ids, customLabels = {}) {
     const section = SECTION_BY_ID.get(sectionId);
     if (!section || !Array.isArray(ids)) return [];
     const lookup = new Map(section.chips.map(chip => [chip.id, chip.prompt]));
-    return ids.map(id => lookup.get(id)).filter(Boolean);
+    return ids
+        .map(id => (isCustomId(id) ? customText(id, customLabels) : lookup.get(id)))
+        .filter(Boolean);
 }
 
 /**
@@ -226,11 +446,14 @@ export function promptsFor(sectionId, ids) {
  * @param {string} sectionId
  * @param {string[]} ids
  * @param {'en'|'ru'} lang
+ * @param {Record<string, string>} [customLabels]
  * @returns {string[]}
  */
-export function labelsFor(sectionId, ids, lang) {
+export function labelsFor(sectionId, ids, lang, customLabels = {}) {
     const section = SECTION_BY_ID.get(sectionId);
     if (!section || !Array.isArray(ids)) return [];
     const lookup = new Map(section.chips.map(chip => [chip.id, chip[lang] || chip.en]));
-    return ids.map(id => lookup.get(id)).filter(Boolean);
+    return ids
+        .map(id => (isCustomId(id) ? customText(id, customLabels) : lookup.get(id)))
+        .filter(Boolean);
 }

@@ -8,8 +8,14 @@
 const STRINGS = {
     en: {
         title: 'Estate',
-        menuTitle: 'Design a home and write it to a lorebook',
+        menuTitle: 'Design a home or a building and write it to a lorebook',
         intro: 'Pick what the place should feel like. The model writes the description; the extension builds the lorebook entries and their keyword patterns.',
+
+        // Tabs
+        tabHome: 'Home',
+        tabPlace: 'Building',
+        tabHomeHint: 'Where someone lives.',
+        tabPlaceHint: 'Any other building: a church, a town hall, a tavern.',
 
         // Target
         target: 'Whose home',
@@ -18,12 +24,25 @@ const STRINGS = {
         targetShared: 'Shared home',
         targetHint: 'Shared means one household both of them live in.',
 
+        // Places
+        placeName: 'Name of the place',
+        placeNameHint: 'Optional. Given a name, the model uses it and adds it as a keyword.',
+        placeNamePlaceholder: 'The Drowned Crow',
+
         // Tag sections
         sectionCount: '{n} picked',
         pickOne: 'pick one',
         pickUpTo: 'up to {n}',
         clearSection: 'Clear',
         limitReached: 'Up to {n} picks in "{section}".',
+
+        // Custom tags
+        addCustom: '+ own',
+        addCustomTitle: 'Add your own tag to "{section}"',
+        customPrompt: 'Your tag for "{section}":',
+        customRemove: 'Remove this tag',
+        customFull: 'No room for more of your own tags in "{section}".',
+        customEmpty: 'An empty tag cannot be added.',
 
         // Free-form
         extra: 'Anything else',
@@ -43,10 +62,6 @@ const STRINGS = {
         bindPersona: 'The persona',
         bindNone: 'Nothing — just create it',
         bindHint: 'Only applies when a new lorebook is created.',
-        language: 'Write in',
-        langAuto: 'Match the chat',
-        langEn: 'English',
-        langRu: 'Русский',
         detail: 'Detail',
         detailBrief: 'Brief',
         detailNormal: 'Normal',
@@ -55,7 +70,10 @@ const STRINGS = {
         granularity: 'Split into',
         granularityOne: 'One entry',
         granularityRooms: 'One entry per room',
+        granularityZones: 'One entry per zone',
         granularityHint: 'Per-room entries trigger only when that room comes up, so they cost less context.',
+        granularityHintPlace: 'Per-zone entries trigger only when that part of the building comes up, so they cost less context.',
+        languageNote: 'Entries are written in English; keywords are generated in both English and Russian.',
 
         // Model
         model: 'Model',
@@ -93,6 +111,7 @@ const STRINGS = {
         keyStem: 'all word forms',
         keyExact: 'exact word',
         keySuffix: 'word + endings',
+        keyGroup: 'synonyms, all forms',
         keyPlain: 'plain text',
         keyRejected: '{n} keyword(s) dropped as unusable.',
         noKeys: 'No keywords — this entry would never trigger.',
@@ -103,6 +122,7 @@ const STRINGS = {
 
         // Settings card
         settingsIntro: 'Defaults for the Estate dialog.',
+        settingsOpen: 'Open Estate',
         settingsHeading: 'Defaults',
         settingsNameTemplate: 'New lorebook name',
         settingsInstruction: 'Extra instruction',
@@ -112,6 +132,7 @@ const STRINGS = {
 
         // Toasts
         toastNoSelection: 'Pick at least a dwelling type or write something in "Anything else".',
+        toastNoSelectionPlace: 'Pick at least a building type or write something in "Anything else".',
         toastNoApi: 'This needs a Chat Completion API or a saved connection profile.',
         toastBusy: 'Wait for the current generation to finish.',
         toastFailed: 'Generation failed. Details are in the console.',
@@ -128,8 +149,13 @@ const STRINGS = {
 
     ru: {
         title: 'Estate',
-        menuTitle: 'Придумать жильё и записать его в лорбук',
+        menuTitle: 'Придумать жильё или здание и записать его в лорбук',
         intro: 'Выберите, каким должно быть место. Модель напишет описание, расширение соберёт записи лорбука и ключи к ним.',
+
+        tabHome: 'Жильё',
+        tabPlace: 'Здание',
+        tabHomeHint: 'Там, где кто-то живёт.',
+        tabPlaceHint: 'Любое другое здание: церковь, ратуша, таверна.',
 
         target: 'Чьё жильё',
         targetChar: 'Персонаж',
@@ -137,11 +163,22 @@ const STRINGS = {
         targetShared: 'Общее жильё',
         targetHint: 'Общее — это один дом, в котором живут оба.',
 
+        placeName: 'Название места',
+        placeNameHint: 'Необязательно. Если задано — модель его использует и добавит в ключи.',
+        placeNamePlaceholder: 'Утопший грач',
+
         sectionCount: 'выбрано {n}',
         pickOne: 'один вариант',
         pickUpTo: 'до {n}',
         clearSection: 'Сбросить',
         limitReached: 'В разделе «{section}» можно выбрать не больше {n}.',
+
+        addCustom: '+ свой',
+        addCustomTitle: 'Добавить свой тег в раздел «{section}»',
+        customPrompt: 'Ваш тег для раздела «{section}»:',
+        customRemove: 'Удалить этот тег',
+        customFull: 'В разделе «{section}» больше нет места для своих тегов.',
+        customEmpty: 'Пустой тег добавить нельзя.',
 
         extra: 'Что ещё',
         extraHint: 'Своими словами: деталь, правило, вещь, которая обязана там быть. Уходит в промпт как есть.',
@@ -159,10 +196,6 @@ const STRINGS = {
         bindPersona: 'Персоне',
         bindNone: 'Ни к чему — просто создать',
         bindHint: 'Работает только при создании нового лорбука.',
-        language: 'Язык описания',
-        langAuto: 'Как в чате',
-        langEn: 'English',
-        langRu: 'Русский',
         detail: 'Детальность',
         detailBrief: 'Кратко',
         detailNormal: 'Обычно',
@@ -171,7 +204,10 @@ const STRINGS = {
         granularity: 'Разбить на',
         granularityOne: 'Одну запись',
         granularityRooms: 'Запись на комнату',
+        granularityZones: 'Запись на зону',
         granularityHint: 'Покомнатные записи срабатывают только когда речь заходит об этой комнате — контекста тратят меньше.',
+        granularityHintPlace: 'Позонные записи срабатывают только когда речь заходит об этой части здания — контекста тратят меньше.',
+        languageNote: 'Записи пишутся на английском, ключи собираются сразу на английском и русском.',
 
         model: 'Модель',
         modelUseCurrent: 'Текущее подключение',
@@ -205,6 +241,7 @@ const STRINGS = {
         keyStem: 'все формы слова',
         keyExact: 'точное слово',
         keySuffix: 'слово с окончаниями',
+        keyGroup: 'синонимы, все формы',
         keyPlain: 'обычный текст',
         keyRejected: 'Отброшено негодных ключей: {n}.',
         noKeys: 'Ключей нет — запись никогда не сработает.',
@@ -214,6 +251,7 @@ const STRINGS = {
         selectNone: 'Снять',
 
         settingsIntro: 'Значения по умолчанию для окна Estate.',
+        settingsOpen: 'Открыть Estate',
         settingsHeading: 'По умолчанию',
         settingsNameTemplate: 'Имя нового лорбука',
         settingsInstruction: 'Доп. инструкция',
@@ -222,6 +260,7 @@ const STRINGS = {
         settingsSaved: 'Сохранено.',
 
         toastNoSelection: 'Выберите хотя бы тип жилья или напишите что-нибудь в «Что ещё».',
+        toastNoSelectionPlace: 'Выберите хотя бы тип здания или напишите что-нибудь в «Что ещё».',
         toastNoApi: 'Нужен Chat Completion API или сохранённый профиль подключения.',
         toastBusy: 'Дождитесь окончания текущей генерации.',
         toastFailed: 'Генерация не удалась. Подробности в консоли.',

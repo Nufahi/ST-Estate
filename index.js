@@ -5,6 +5,7 @@
  */
 
 import { is_send_press } from '/script.js';
+import { paintIcons } from './icon.js';
 import { t } from './i18n.js';
 import { buildRequest, extractJson, normalizeEntries } from './prompt.js';
 import { openPreview } from './preview.js';
@@ -76,6 +77,25 @@ async function runGeneration(ctx, settings, profileId, options) {
 }
 
 /**
+ * Who the entries belong to, for the badge in each title. Resolved once per
+ * run so a character switch mid-generation cannot mislabel half the batch.
+ */
+function resolveOrigin(ctx, settings) {
+    const mode = settings.mode === 'place' ? 'place' : 'home';
+    if (mode === 'place') return { mode, target: 'place', owner: '' };
+
+    const charName = String(ctx.name2 || '').trim();
+    const userName = String(ctx.name1 || '').trim();
+    const owner = settings.target === 'persona'
+        ? userName
+        : settings.target === 'shared'
+            ? [charName, userName].filter(Boolean).join(' & ')
+            : charName;
+
+    return { mode, target: settings.target, owner };
+}
+
+/**
  * Give each draft entry its ordering tier. Room entries sit just under the
  * whole-home entry so the general description reads first.
  */
@@ -144,13 +164,15 @@ async function generateEstate(settings, hooks) {
 
         const isNew = settings.createNew || !settings.lorebookName;
         const book = isNew ? buildLorebookName(settings.nameTemplate) : settings.lorebookName;
+        const origin = resolveOrigin(ctx, settings);
 
-        return await openPreview(entries, { book, isNew }, async selected => {
+        return await openPreview(entries, { book, isNew, mode: origin.mode }, async selected => {
             try {
                 const result = await writeEntries(selected, {
                     name: book,
                     create: isNew,
                     bind: settings.bind,
+                    origin,
                 });
 
                 toastr.success(t('toastWritten', { n: result.written, book: result.name }), t('title'));
@@ -196,7 +218,7 @@ async function generateEstate(settings, hooks) {
 // Settings card
 // ---------------------------------------------------------------------------
 
-function bindSettingsUi() {
+function bindSettingsUi(open) {
     const settings = getSettings();
     const root = document.querySelector(SETTINGS_SELECTOR);
     if (!root) return;
@@ -204,25 +226,38 @@ function bindSettingsUi() {
     for (const element of root.querySelectorAll('[data-estate-i18n]')) {
         element.textContent = t(element.dataset.estateI18n);
     }
+    paintIcons(root);
 
     const nameTemplate = /** @type {HTMLInputElement} */ (root.querySelector('#estate_name_template'));
     const instruction = /** @type {HTMLTextAreaElement} */ (root.querySelector('#estate_instruction'));
     const reset = root.querySelector('#estate_reset');
+    const saved = root.querySelector('#estate_saved');
     if (!nameTemplate || !instruction || !reset) return;
+
+    root.querySelector('#estate_open')?.addEventListener('click', () => open());
+
+    // The save itself is instant; this only reassures, so it never blocks.
+    let hideTimer = null;
+    const flashSaved = () => {
+        if (!saved) return;
+        saved.classList.add('estate-settings__saved--on');
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => saved.classList.remove('estate-settings__saved--on'), 1600);
+    };
 
     nameTemplate.value = settings.nameTemplate;
     nameTemplate.addEventListener('change', () => {
         settings.nameTemplate = nameTemplate.value.trim() || defaultNameTemplate();
         nameTemplate.value = settings.nameTemplate;
         saveSettings();
-        toastr.success(t('settingsSaved'), t('title'));
+        flashSaved();
     });
 
     instruction.value = settings.instruction;
     instruction.addEventListener('change', () => {
         settings.instruction = instruction.value.trim();
         saveSettings();
-        toastr.success(t('settingsSaved'), t('title'));
+        flashSaved();
     });
 
     reset.addEventListener('click', () => {
@@ -231,10 +266,11 @@ function bindSettingsUi() {
         nameTemplate.value = settings.nameTemplate;
         instruction.value = '';
         saveSettings();
+        flashSaved();
     });
 }
 
-async function mountSettings() {
+async function mountSettings(open) {
     if (document.querySelector(SETTINGS_SELECTOR)) return;
 
     const response = await fetch(`${EXT_PATH}/settings.html`);
@@ -249,7 +285,7 @@ async function mountSettings() {
     if (!block) throw new Error('Settings template is empty.');
 
     host.appendChild(block);
-    bindSettingsUi();
+    bindSettingsUi(open);
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +300,7 @@ function registerSlashCommand(open) {
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'estate',
-            helpString: 'Open the Estate dialog: design a home and write it to a lorebook.',
+            helpString: 'Open the Estate dialog: design a home or a building and write it to a lorebook.',
             callback: async () => {
                 open();
                 return '';
@@ -286,7 +322,7 @@ jQuery(async () => {
     registerSlashCommand(open);
 
     try {
-        await mountSettings();
+        await mountSettings(open);
     } catch (error) {
         warn('settings', error);
     }

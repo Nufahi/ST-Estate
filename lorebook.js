@@ -27,6 +27,13 @@ export const STAMP = 'estate';
  * Title badges. Everything lands in one lorebook, so the entry list has to say
  * at a glance whose place a row describes. These sit in `comment`, which is a
  * memo for the editor and plays no part in keyword matching.
+ *
+ * One glyph per owner is the whole mechanism: the character's home, the
+ * user's, the one they share and a building nobody lives in each get their
+ * own, and the row then needs nothing but the name of the room. Spelling the
+ * owner out instead — "🎭 Anna — Kitchen" — repeated the same name down every
+ * row of the list and pushed the part that actually differs off the edge on a
+ * phone.
  */
 export const BADGE = Object.freeze({
     character: '🎭',
@@ -36,19 +43,28 @@ export const BADGE = Object.freeze({
 });
 
 /**
- * Prefix an entry title with its badge and, for a home, its owner.
+ * Prefix an entry title with its badge, and — for a building — its name.
+ *
+ * The place name stays because it is the only thing telling two taverns in one
+ * lorebook apart. A home needs no such thing: the badge already says whose it
+ * is, and the character's name is on the chat.
  *
  * @param {string} title
- * @param {{mode?: 'home'|'place', target?: string, owner?: string}} origin
+ * @param {{mode?: 'home'|'place', target?: string, place?: string}} origin
  * @returns {string}
  */
 export function decorateTitle(title, origin = {}) {
     const text = String(title || '').trim() || 'Entry';
-    if (origin.mode === 'place') return `${BADGE.place} ${text}`;
 
-    const badge = BADGE[origin.target] || BADGE.character;
-    const owner = String(origin.owner || '').trim();
-    return owner ? `${badge} ${owner} — ${text}` : `${badge} ${text}`;
+    if (origin.mode === 'place') {
+        const place = String(origin.place || '').trim();
+        // A model handed a place name usually works it into the title already;
+        // prefixing it again would read "The Drowned Crow — The Drowned Crow".
+        const named = place && !text.toLowerCase().includes(place.toLowerCase());
+        return named ? `${BADGE.place} ${place} — ${text}` : `${BADGE.place} ${text}`;
+    }
+
+    return `${BADGE[origin.target] || BADGE.character} ${text}`;
 }
 
 /** `world_info_position` values, mirrored so this module needs no extra import. */
@@ -293,7 +309,7 @@ export function composeContent(entry) {
  * @param {boolean} [options.create] Create the lorebook before writing.
  * @param {'chat'|'character'|'persona'|'none'} [options.bind] Binding to apply
  *        after a successful creation.
- * @param {{mode?: 'home'|'place', target?: string, owner?: string}} [options.origin]
+ * @param {{mode?: 'home'|'place', target?: string, place?: string}} [options.origin]
  *        Whose place this is, for the title badge.
  * @returns {Promise<{written: number, name: string, bound: boolean, bindFailed: boolean}>}
  */

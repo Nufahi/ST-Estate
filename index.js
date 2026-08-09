@@ -78,21 +78,18 @@ async function runGeneration(ctx, settings, profileId, options) {
 
 /**
  * Who the entries belong to, for the badge in each title. Resolved once per
- * run so a character switch mid-generation cannot mislabel half the batch.
+ * run so a switch mid-generation cannot mislabel half the batch.
+ *
+ * A home carries no name: the badge distinguishes the character's place from
+ * the user's from the shared one, which is all a title needs to say. A
+ * building carries its own name, because two of them can sit in one lorebook.
  */
-function resolveOrigin(ctx, brief) {
+function resolveOrigin(brief) {
     const mode = brief.mode === 'place' ? 'place' : 'home';
-    if (mode === 'place') return { mode, target: 'place', owner: '' };
-
-    const charName = String(ctx.name2 || '').trim();
-    const userName = String(ctx.name1 || '').trim();
-    const owner = brief.target === 'persona'
-        ? userName
-        : brief.target === 'shared'
-            ? [charName, userName].filter(Boolean).join(' & ')
-            : charName;
-
-    return { mode, target: brief.target, owner };
+    if (mode === 'place') {
+        return { mode, target: 'place', place: String(brief.placeName || '').trim() };
+    }
+    return { mode, target: brief.target, place: '' };
 }
 
 /**
@@ -141,7 +138,18 @@ async function generateEstate(settings, brief, hooks) {
     const request = { ...settings, ...brief };
 
     try {
-        const parseOptions = { englishOnly: settings.keyLanguage === 'en' };
+        // The names are handed to the parser so an owner the model wrote into a
+        // title can be taken back out: the badge says whose place it is, and
+        // saying it again on every row is what crowded the lorebook list.
+        //
+        // Homes only. A building can legitimately be called "Anna's Rest", and
+        // stripping the name out of that leaves an entry titled "Rest".
+        const parseOptions = {
+            englishOnly: settings.keyLanguage === 'en',
+            names: brief.mode === 'place'
+                ? []
+                : [ctx.name2, ctx.name1].map(name => String(name || '').trim()).filter(Boolean),
+        };
 
         // Read once, before the first request, so the retry pass sees the same
         // material and a mid-run lorebook edit cannot change the brief.
@@ -204,7 +212,7 @@ async function generateEstate(settings, brief, hooks) {
 
         const isNew = brief.createNew || !brief.lorebookName;
         const book = isNew ? buildLorebookName(settings.nameTemplate) : brief.lorebookName;
-        const origin = resolveOrigin(ctx, brief);
+        const origin = resolveOrigin(brief);
 
         return await openPreview(entries, { book, isNew, mode: origin.mode }, async selected => {
             try {

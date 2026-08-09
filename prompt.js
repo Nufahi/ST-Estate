@@ -76,7 +76,7 @@ function schema(bilingual) {
         '{',
         '  "entries": [',
         '    {',
-        '      "title": "short entry title, 2-5 words",',
+        '      "title": "the room, zone or place this entry describes — 1-3 words, no names of people",',
         '      "room": "which room, zone or aspect this entry covers, or \\"whole\\" for the entire place",',
         '      "keys": [',
         ...keys,
@@ -341,6 +341,17 @@ export function buildRequest(settings, options = {}) {
         + ' ceiling material — not only the objects standing in it.',
         '',
         ...surfaceRule,
+        'THE TITLE',
+        // The entry list is a column of comments, and every character of a
+        // title that repeats across all of them is a character stolen from the
+        // part that differs. Whose place it is comes from a badge the extension
+        // prefixes; the title carries the location and nothing else.
+        '- "title" names the place itself: "Kitchen", "Back stairs", "Main hall".',
+        '- Never put a person\'s name in the title, and never write "\'s home", '
+        + '"the home of", "her flat" or any other statement of ownership. That is '
+        + 'added afterwards and would only be said twice.',
+        `- One to three words.${mode === 'place' ? ' Do not repeat the name of the building in every title.' : ''}`,
+        '',
         entryPlan,
         `Produce at most ${MAX_ENTRIES} entries. Between ${counts.min} and ${counts.max} keywords each.`,
         languageRule,
@@ -519,13 +530,73 @@ function balance(source) {
 }
 
 /**
+ * Strip an owner out of an entry title.
+ *
+ * The prompt asks for the location alone, and models still return "Anna's
+ * kitchen" or "Home of Anna — Kitchen" often enough to matter. The badge
+ * already says whose place it is, so the name is a repetition on every row of
+ * the lorebook list. Removed here rather than left to the review dialog: the
+ * point of the badge is that nobody has to edit thirteen titles by hand.
+ *
+ * Only leading and trailing owner phrases go. A title that is *nothing* but a
+ * name is kept, because whatever is left would be nothing at all.
+ *
+ * @param {string} title
+ * @param {string[]} names
+ * @returns {string}
+ */
+export function stripOwner(title, names = []) {
+    let text = String(title || '').trim();
+
+    const owners = names
+        .map(name => String(name || '').trim())
+        .filter(name => name.length > 1)
+        .map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+
+    const owner = owners.length ? `(?:${owners.join('|')})` : null;
+    const dwelling = '(?:home|house|apartment|flat|residence|dwelling|quarters|place|room)';
+    const possessive = '(?:his|her|their|its|your|my|the\\s+character[\'’]s|the\\s+user[\'’]s)';
+
+    const patterns = [
+        // "Home of Anna — Kitchen", and the same without a name to match against.
+        new RegExp(`^(?:the\\s+)?${dwelling}\\s+of\\s+[^—:|]{1,40}[\\s—:|-]*`, 'i'),
+        // "Anna's flat: Bathroom" — the possessive plus the dwelling word.
+        new RegExp(`^[^—:|]{1,40}[\'’]s\\s+${dwelling}[\\s—:|-]*`, 'i'),
+        // "Her apartment - Hallway". A pronoun is a name the parser cannot know.
+        new RegExp(`^${possessive}\\s+${dwelling}[\\s—:|-]*`, 'i'),
+        new RegExp(`^${possessive}\\s+(?=\\S)`, 'i'),
+    ];
+    if (owner) {
+        patterns.push(
+            new RegExp(`^${owner}[\'’]s\\s+`, 'i'),
+            new RegExp(`^${owner}\\s*[—:|-]\\s*`, 'i'),
+            new RegExp(`\\s*[—:|(-]\\s*${owner}[\'’]?s?\\s*\\)?$`, 'i'),
+        );
+    }
+
+    for (const pattern of patterns) {
+        const stripped = text.replace(pattern, '').trim();
+        // A title made entirely of the owner leaves nothing behind; keeping the
+        // original is less wrong than writing an entry called "".
+        if (stripped) text = stripped;
+    }
+
+    text = text.replace(/^[\s—:|-]+|[\s—:|-]+$/g, '').trim();
+
+    // "Anna's home" reduces to "home", which is right but reads like a typo in
+    // a list of titles that are otherwise capitalised.
+    return text.replace(/^[a-z]/, letter => letter.toUpperCase());
+}
+
+/**
  * Validate and normalise the parsed reply into draft entries.
  * Keyword compilation happens later, in the preview layer, so the user can
  * still edit the raw stems before they become patterns.
  *
  * @param {object} value
- * @param {{englishOnly?: boolean}} [options] drop Cyrillic keywords the model
- *        produced despite being asked for English ones.
+ * @param {{englishOnly?: boolean, names?: string[]}} [options] `englishOnly`
+ *        drops Cyrillic keywords the model produced despite being asked for
+ *        English ones; `names` are the people whose name must not sit in a title.
  * @returns {{ok: true, entries: object[], keyless: number} | {ok: false, error: string}}
  */
 export function normalizeEntries(value, options = {}) {
@@ -541,9 +612,10 @@ export function normalizeEntries(value, options = {}) {
         const content = String(raw.content ?? '').trim();
         if (!content) continue;
 
-        const title = String(raw.title ?? '').trim().slice(0, 120)
-            || String(raw.room ?? '').trim().slice(0, 120)
-            || 'Home';
+        const title = stripOwner(
+            String(raw.title ?? '').trim() || String(raw.room ?? '').trim(),
+            options.names,
+        ).slice(0, 120) || 'Home';
 
         const keys = normalizeKeySpecs(raw.keys, options.englishOnly === true);
         if (!keys.length) keyless++;

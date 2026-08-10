@@ -126,8 +126,45 @@ export function buildSuggestRequest(job, options = {}) {
             { role: 'system', content: system },
             { role: 'user', content: userParts.join('\n\n') },
         ],
-        // Small replies: a name, a clause and a handful of ids apiece.
-        responseLength: Math.min(4096, 220 * count + 512),
+        // Small replies: a name, a clause and a handful of ids apiece. The
+        // headroom on top is for reasoning models, which are refused outright
+        // by the provider when they think their way through the whole
+        // allowance before writing anything.
+        responseLength: Math.min(16384, 220 * count + 4608),
+        jsonSchema: suggestSchema(),
+    };
+}
+
+/**
+ * The structured-output schema for a scouting reply.
+ *
+ * `tags` is left as a free-form object: the sections it may carry are decided
+ * by the catalog at runtime, and `strict` mode forbids the open shape that
+ * needs. Everything that matters — a list, with a name on every item — is
+ * constrained, and the tags are validated against the catalog anyway.
+ */
+function suggestSchema() {
+    return {
+        name: 'estate_places',
+        description: 'Buildings this story should have written down.',
+        value: {
+            type: 'object',
+            required: ['places'],
+            properties: {
+                places: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        required: ['name'],
+                        properties: {
+                            name: { type: 'string', description: 'What the chat calls the place.' },
+                            why: { type: 'string', description: 'One short clause saying where it came from.' },
+                            tags: { type: 'object', description: 'Tag ids from the menu, keyed by section id.' },
+                        },
+                    },
+                },
+            },
+        },
     };
 }
 

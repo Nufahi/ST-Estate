@@ -17,10 +17,9 @@ import { coverList, customLabels, targetWords } from './settings.js';
 const MAX_ENTRIES = 12;
 
 /**
- * Keyword counts per entry. These are deliberately modest: every key is a
- * small JSON object, and asking for two dozen of them pushes the reply past
- * the token budget, at which point the tail — the keys themselves — is what
- * gets cut off. Bilingual keying doubles the list, so it gets the larger cap.
+ * Keyword counts per entry. A key is now a bare word rather than an object,
+ * so the list is cheap; the cap exists because a long keyword list makes an
+ * entry fire on everything, not because of the token budget.
  */
 const KEY_COUNTS = Object.freeze({
     both: { min: 6, max: 14 },
@@ -39,34 +38,103 @@ const MAX_KEYS_PER_ENTRY = 24;
 const COVER_WORDS = 45;
 const COVER_WORDS_MAX = 360;
 
-/** Rough token cost of one key spec object, used only to size the reply. */
-const TOKENS_PER_KEY = 24;
+/** Rough token cost of one keyword string, used only to size the reply. */
+const TOKENS_PER_KEY = 6;
 /** Token cost of the title, room and visual fields plus JSON punctuation. */
 const TOKENS_PER_ENTRY_OVERHEAD = 120;
 
 /**
- * Reply contract handed to the model verbatim. The key examples follow the
- * chosen scripts: leaving Cyrillic in the sample while asking for English
- * keywords is an invitation to drift straight back to Russian.
+ * Headroom added on top of the prose budget, in tokens.
+ *
+ * Reasoning models spend the output allowance on thinking before a single
+ * character of the answer exists, and providers answer that with a hard
+ * error rather than a short reply: "the output token limit was exhausted by
+ * model reasoning". A budget sized to the prose alone is therefore a budget
+ * that fails outright on every thinking model, so the ceiling is raised well
+ * past what the answer needs. It costs nothing when unused — `max_tokens` is
+ * a limit, not a spend.
+ */
+const REASONING_HEADROOM = 4096;
+
+/** Floor and ceiling on the reply budget, whatever the arithmetic says. */
+const RESPONSE_MIN = 2048;
+const RESPONSE_MAX = 32768;
+
+/**
+ * How many entries one request is allowed to carry.
+ *
+ * This is the single biggest cause of unusable replies. Asked for eleven
+ * rooms at once, a model writes six well, hurries the rest, and truncates
+ * somewhere in the middle of the eighth — and one broken string costs the
+ * whole batch. Split into pieces of three, the same model returns four small
+ * replies that all parse. It is slower, and it works, which is the trade
+ * being made here deliberately.
+ */
+export const ENTRIES_PER_REQUEST = Object.freeze({ min: 1, max: 12, default: 3 });
+
+/**
+ * The structured-output schema, handed to providers that support one.
+ *
+ * This is the real fix for malformed JSON: with a schema in the payload the
+ * model is constrained by the provider rather than asked politely, and the
+ * shape simply cannot come back wrong. SillyTavern forwards it as
+ * `response_format: json_schema` on OpenAI-style backends, as a tool on
+ * Claude and as `responseSchema` on Gemini; the ones that cannot take it get
+ * the schema pasted into the prompt instead, which is what the text contract
+ * below is for.
+ *
+ * Keys are plain strings here, not objects. A mode-and-value object per
+ * keyword was three times the tokens and the thing models most often got
+ * wrong; the mode is now written as a prefix inside the string, which no
+ * schema has to describe and no model has to nest.
+ */
+export function entriesSchema() {
+    return {
+        name: 'estate_entries',
+        description: 'Lorebook entries describing one place.',
+        strict: true,
+        value: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['entries'],
+            properties: {
+                entries: {
+                    type: 'array',
+                    items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        required: ['title', 'room', 'keys', 'visual', 'content'],
+                        properties: {
+                            title: { type: 'string', description: '1-3 words naming the room or zone. No personal names.' },
+                            room: { type: 'string', description: 'Which room or zone this covers, or "whole".' },
+                            keys: {
+                                type: 'array',
+                                items: { type: 'string' },
+                                description: 'Trigger keywords, one word each, optionally prefixed with a mode: "kitchen", "=hall", "couch|sofa", "The Drowned Crow".',
+                            },
+                            visual: { type: 'string', description: 'Comma-separated visual tags in English.' },
+                            content: { type: 'string', description: 'The description itself.' },
+                        },
+                    },
+                },
+            },
+        },
+    };
+}
+
+/**
+ * Reply contract handed to the model verbatim, for backends with no schema
+ * support. The key examples follow the chosen scripts: leaving Cyrillic in
+ * the sample while asking for English keywords is an invitation to drift
+ * straight back to Russian.
  *
  * @param {boolean} bilingual
  * @returns {string}
  */
 function schema(bilingual) {
-    const keys = [
-        '        { "mode": "stem",   "lang": "en", "value": "kitchen" },',
-        '        { "mode": "exact",  "lang": "en", "value": "hall" },',
-        '        { "mode": "group",  "lang": "en", "values": ["couch", "sofa", "settee"] },',
-        '        { "mode": "suffix", "lang": "en", "value": "cook", "suffixes": ["s", "ed", "ing"] },',
-    ];
-    if (bilingual) {
-        keys.push(
-            '        { "mode": "stem",   "lang": "ru", "value": "кухн" },',
-            '        { "mode": "group",  "lang": "ru", "values": ["диван", "кушетк"] },',
-            '        { "mode": "exact",  "lang": "ru", "value": "дом" },',
-        );
-    }
-    keys.push('        { "mode": "proper", "value": "Crimson Bar" }');
+    const keys = bilingual
+        ? '"kitchen", "кухн", "=hall", "=дом", "couch|sofa|settee", "диван|кушетк", "The Drowned Crow"'
+        : '"kitchen", "=hall", "couch|sofa|settee", "The Drowned Crow"';
 
     // Field order is load-bearing. `content` is by far the longest field, and a
     // reply that runs out of tokens is cut from the end — so anything after the
@@ -76,11 +144,9 @@ function schema(bilingual) {
         '{',
         '  "entries": [',
         '    {',
-        '      "title": "the room, zone or place this entry describes — 1-3 words, no names of people",',
-        '      "room": "which room, zone or aspect this entry covers, or \\"whole\\" for the entire place",',
-        '      "keys": [',
-        ...keys,
-        '      ],',
+        '      "title": "the room or zone this entry describes — 1-3 words, no names of people",',
+        '      "room": "which room or zone this entry covers, or \\"whole\\" for the entire place",',
+        `      "keys": [${keys}],`,
         '      "visual": "comma-separated visual tags: materials, colours, light, notable objects",',
         '      "content": "the description itself"',
         '    }',
@@ -89,50 +155,45 @@ function schema(bilingual) {
     ].join('\n');
 }
 
-const KEY_RULES = `KEYWORD RULES — read carefully, this is the part that usually goes wrong.
+const KEY_RULES = `KEYWORD RULES — plain strings, nothing clever.
 
-Never write a regular expression. Never write slashes, \\b, lookarounds or
-character classes. Declare a bare word and a mode; the patterns are compiled
-for you.
+Every keyword is one short string in the "keys" array. Never write a regular
+expression, a slash, \\b, a lookaround or a character class, and never write
+an object — the patterns are built for you from these strings.
 
-Modes:
-  stem   — a word root without its ending. Matches every inflected form.
-           "window" catches window, windows, windowsill.
-           Use this for almost every ordinary noun.
-  exact  — the whole word only, no other endings. Use it when a stem would
-           bleed: "hall" as exact will not fire on "hallmark", and "base"
-           will not fire on "baseball".
-  group  — several near-synonyms that mean the same thing here. Supply
-           "values" as an array. Each one still matches all forms.
-  suffix — a word plus a listed set of endings, for irregular or awkward
-           cases. Supply "suffixes".
-  proper — a proper noun, used as literal text: a street, a bar, a district.
+Four forms, and that is all there is:
+  kitchen              a word root without its ending. Matches every inflected
+                       form: window catches window, windows, windowsill.
+                       Use this for almost every ordinary noun.
+  =hall                a leading "=" means the whole word only, no endings.
+                       Use it where a root would bleed: =hall will not fire on
+                       "hallmark", =base will not fire on "baseball".
+  couch|sofa|settee    near-synonyms separated by "|". Each still matches all
+                       its forms.
+  The Drowned Crow     a proper noun, written with its spaces, used literally.
 
-Give a stem, not a full word: "kitchen", not "kitchens". A stem must be at
-least 4 characters, otherwise use exact.
-A value is always a single word with no spaces — the only exception is
-"proper", which may contain spaces.
-Set "lang" to "ru" or "en" to match the script the value is written in.`;
+Give a root, not a full word: "kitchen", not "kitchens". A root shorter than
+four characters is treated as a whole word anyway, so prefix it with "=".
+No spaces inside a keyword unless it is a proper noun.`;
 
 /** Appended to KEY_RULES when only English keywords are wanted. */
-const KEYS_EN_ONLY = `ENGLISH KEYWORDS ONLY. Every keyword value is written in
-English, whatever language anything else uses. Set "lang" to "en" on all of
-them. Proper nouns are the one exception — a name stays in whatever script it
-is written in. Russian keywords will be discarded.`;
+const KEYS_EN_ONLY = `ENGLISH KEYWORDS ONLY. Every keyword is written in
+English, whatever language anything else uses. Proper nouns are the one
+exception — a name stays in whatever script it is written in. Russian
+keywords will be discarded.`;
 
 /** Appended to KEY_RULES when the entry must fire in either language. */
 const KEYS_BILINGUAL = `BOTH LANGUAGES, ALWAYS. The chat may be in English or
 in Russian, and the entry has to fire either way. For every concept you key
 on, give the English keyword AND its Russian equivalent as two separate
-entries in the list:
+strings:
 
-  { "mode": "stem", "lang": "en", "value": "kitchen" },
-  { "mode": "stem", "lang": "ru", "value": "кухн" }
+  "kitchen", "кухн"
 
 This is not optional and it is the mistake that gets made most often: a list
 containing only English keywords is a failed reply. Roughly half of your
-keywords must be Russian. Russian stems follow the same rule — give the root
-without its ending: "кухн", not "кухня"; "кварти", not "квартира".
+keywords must be Russian. Russian keywords follow the same rule — give the
+root without its ending: "кухн", not "кухня"; "кварти", not "квартира".
 
 Pick the few concepts that genuinely identify this place and key on those.
 A short, accurate list beats a long one.`;
@@ -249,13 +310,62 @@ export function buildContext(ctx, settings, lore = '') {
 }
 
 /**
+ * Break one place into the requests that will write it.
+ *
+ * A single-entry brief is one request and always was. A per-room brief used
+ * to be one request too, and that is what has been failing: eleven rooms in
+ * one reply is several thousand tokens of JSON, and one unescaped quote or
+ * one token short of the closing brace takes the whole batch with it.
+ *
+ * So it is cut into pieces. Each piece asks for a handful of rooms, the
+ * whole-place entry rides with the first, and a piece that comes back broken
+ * costs only its own rooms. Slower — four requests where there was one — and
+ * the entries actually arrive, which is the trade being made.
+ *
+ * @param {object} settings settings and brief, merged
+ * @returns {Array<{rooms: string[], whole: boolean, index: number, total: number}>}
+ */
+export function planChunks(settings) {
+    const mode = settings.mode === 'place' ? 'place' : 'home';
+    const splitId = SPLIT_SECTION[mode];
+    const perRoom = settings.granularity === 'rooms';
+    const parts = promptsFor(splitId, settings.picks?.[splitId], customLabels(settings, splitId));
+
+    if (!perRoom || !parts.length) return [{ rooms: [], whole: true, index: 0, total: 1 }];
+
+    const size = clampChunkSize(settings.entriesPerRequest);
+    const rooms = parts.slice(0, MAX_ENTRIES);
+
+    const chunks = [];
+    for (let start = 0; start < rooms.length; start += size) {
+        chunks.push({ rooms: rooms.slice(start, start + size), whole: false });
+    }
+
+    // The whole-place entry is short and belongs with the first batch, where
+    // it also sets the tone the later batches are told to match.
+    if (chunks.length) chunks[0].whole = true;
+    else chunks.push({ rooms: [], whole: true });
+
+    return chunks.map((chunk, index) => ({ ...chunk, index, total: chunks.length }));
+}
+
+function clampChunkSize(value) {
+    const number = Number.parseInt(String(value ?? ''), 10);
+    if (!Number.isFinite(number)) return ENTRIES_PER_REQUEST.default;
+    return Math.min(ENTRIES_PER_REQUEST.max, Math.max(ENTRIES_PER_REQUEST.min, number));
+}
+
+/**
  * Build the full request for one generation.
  *
  * @param {object} settings
- * @param {{repair?: string, lore?: string}} [options] `repair` carries the
- *        parser error back to the model on the retry pass; `lore` is the text
- *        of the bound lorebooks, read by the caller because that is async.
- * @returns {{prompt: Array<{role: string, content: string}>, responseLength: number, mode: 'home'|'place', bilingual: boolean}}
+ * @param {{repair?: string, lore?: string, chunk?: object, noSchema?: boolean, budget?: number}} [options]
+ *        `repair` carries the parser error back to the model on the retry
+ *        pass; `lore` is the text of the bound lorebooks, read by the caller
+ *        because that is async; `chunk` is one slice from `planChunks`;
+ *        `budget` overrides the computed reply ceiling, which is how a run
+ *        that died on the token limit asks again with more room.
+ * @returns {{prompt: Array<{role: string, content: string}>, responseLength: number, mode: 'home'|'place', bilingual: boolean, jsonSchema: object|null, entryCount: number}}
  */
 export function buildRequest(settings, options = {}) {
     const ctx = SillyTavern.getContext();
@@ -268,9 +378,17 @@ export function buildRequest(settings, options = {}) {
 
     const splitId = SPLIT_SECTION[mode];
     const perRoom = settings.granularity === 'rooms';
-    const parts = promptsFor(splitId, settings.picks?.[splitId], customLabels(settings, splitId));
+    const allParts = promptsFor(splitId, settings.picks?.[splitId], customLabels(settings, splitId));
     const unit = mode === 'place' ? 'zone' : 'room';
     const cover = coverList(settings.cover);
+
+    // The slice of the place this request is responsible for. Absent, the
+    // request covers everything, which is what a single-entry brief wants and
+    // what every caller predating the split still asks for.
+    const chunk = options.chunk || null;
+    const parts = chunk ? chunk.rooms : allParts;
+    const wantsWhole = !chunk || chunk.whole;
+    const isSlice = !!chunk && chunk.total > 1;
 
     // A must-cover list competes with the word budget, and the budget wins:
     // told to fit ten subjects into 180 words, a model writes a sentence each
@@ -278,13 +396,23 @@ export function buildRequest(settings, options = {}) {
     // Only the single-entry layout needs this — per-room entries already get
     // the full allowance apiece.
     const words = targetWords(settings)
-        + (cover.length && !(perRoom && parts.length)
+        + (cover.length && !(perRoom && allParts.length)
             ? Math.min(cover.length * COVER_WORDS, COVER_WORDS_MAX)
             : 0);
 
+    const whole = mode === 'place' ? 'building' : 'home';
     const entryPlan = perRoom && parts.length
-        ? `Write one entry per listed ${unit}: ${parts.join(', ')}. Add one short entry titled for the ${mode === 'place' ? 'building' : 'home'} as a whole that covers the structure, the approach and the overall impression.`
-        : `Write a single entry covering the whole ${mode === 'place' ? 'building' : 'home'}. If the place has clearly distinct areas, give each its own paragraph inside that one entry.`;
+        ? [
+            `Write one entry per listed ${unit}: ${parts.join(', ')}.`,
+            wantsWhole
+                ? `Add one short entry titled for the ${whole} as a whole that covers the structure, the approach and the overall impression.`
+                : '',
+            isSlice
+                ? `This request covers part of the ${whole} only — batch ${chunk.index + 1} of ${chunk.total}.`
+                + ` Write entries for the ${unit}s listed above and for nothing else; the rest are being written separately.`
+                : '',
+        ].filter(Boolean).join(' ')
+        : `Write a single entry covering the whole ${whole}. If the place has clearly distinct areas, give each its own paragraph inside that one entry.`;
 
     // Entry text is always English; only the keys are a choice, because they
     // are what decides whether a Russian chat can trigger the entry.
@@ -358,7 +486,8 @@ export function buildRequest(settings, options = {}) {
         `- One to three words.${mode === 'place' ? ' Do not repeat the name of the building in every title.' : ''}`,
         '',
         entryPlan,
-        `Produce at most ${MAX_ENTRIES} entries. Between ${counts.min} and ${counts.max} keywords each.`,
+        `Produce at most ${expectedEntries(parts.length, wantsWhole, perRoom, cover.length)} entries.`
+        + ` Between ${counts.min} and ${counts.max} keywords each.`,
         languageRule,
         '',
         // Placed above the keyword rules rather than at the end: the coverage
@@ -383,7 +512,7 @@ export function buildRequest(settings, options = {}) {
     // key or the entry never fires when someone says it by name.
     const placeName = mode === 'place' ? clean(settings.placeName) : '';
     if (placeName) {
-        userParts.push(`Include { "mode": "proper", "value": "${placeName}" } in the keys of every entry.`);
+        userParts.push(`Include "${placeName}" as a keyword in every entry.`);
     }
 
     if (brief) userParts.push(`BRIEF\n${brief}`);
@@ -395,72 +524,151 @@ export function buildRequest(settings, options = {}) {
     if (options.repair) {
         userParts.push(
             `Your previous reply was rejected: ${options.repair}\n`
-            + 'Reply again with the JSON object only. No fences, no commentary, all strings properly escaped. '
+            + 'Reply again with the JSON object only. No fences, no commentary, no explanation, '
+            + 'all strings properly escaped and every brace closed. '
             + `Every entry needs its "keys" array filled in, ${counts.min} keywords at the very least, `
-            + 'written before "content" so it cannot be the part that gets cut short.',
+            + 'written before "content" so it cannot be the part that gets cut short. '
+            + 'Keep it short if you must — a complete short answer beats a truncated long one.',
         );
     }
 
-    // A must-cover item that matches no listed room is allowed an entry of its
-    // own, so the count is not knowable in advance. It is counted in full here:
-    // responseLength is a ceiling rather than a spend, and the failure it
-    // guards against — a reply truncated before its keys — is the expensive one.
-    const entryCount = perRoom && parts.length
-        ? Math.min(parts.length + 1 + cover.length, MAX_ENTRIES)
-        : 1;
-
-    // The budget has to cover the keyword arrays, not just the prose. Sizing it
-    // on word count alone is what left talkative models truncated mid-reply,
-    // with the keys — the last field written — missing entirely.
-    const proseTokens = Math.ceil(words * 2.6);
-    const keyTokens = counts.max * TOKENS_PER_KEY;
-    const perEntry = proseTokens + keyTokens + TOKENS_PER_ENTRY_OVERHEAD;
-    const responseLength = Math.min(32768, Math.max(1536, perEntry * entryCount + 512));
+    const entryCount = expectedEntries(parts.length, wantsWhole, perRoom, cover.length);
 
     return {
         prompt: [
             { role: 'system', content: system },
             { role: 'user', content: userParts.join('\n\n') },
         ],
-        responseLength,
+        responseLength: options.budget || replyBudget(words, counts.max, entryCount),
         mode,
         bilingual,
+        jsonSchema: options.noSchema ? null : entriesSchema(),
+        entryCount,
     };
 }
 
 /**
- * Pull a JSON object out of a model reply that may be wrapped in fences,
- * prefaced with chatter, or truncated mid-string.
+ * How many entries this request should produce.
  *
- * @param {string} text
+ * A must-cover item that matches no listed room is allowed an entry of its
+ * own, so the number is a ceiling rather than a count.
+ */
+function expectedEntries(roomCount, wantsWhole, perRoom, coverCount) {
+    if (!perRoom || !roomCount) return 1;
+    return Math.min(roomCount + (wantsWhole ? 1 : 0) + coverCount, MAX_ENTRIES);
+}
+
+/**
+ * The reply ceiling, in tokens.
+ *
+ * Two failures are being guarded against and they pull in the same direction.
+ * A reply cut off mid-JSON loses everything after the cut, and a reasoning
+ * model that spends its whole allowance thinking is refused outright by the
+ * provider — "the output token limit was exhausted by model reasoning" — with
+ * no reply at all. Both are answered by asking for more room than the answer
+ * needs, which costs nothing when it goes unused.
+ *
+ * @param {number} words prose budget per entry
+ * @param {number} maxKeys keywords allowed per entry
+ * @param {number} entries how many entries this request asks for
+ * @returns {number}
+ */
+export function replyBudget(words, maxKeys, entries) {
+    const proseTokens = Math.ceil(words * 2.6);
+    const perEntry = proseTokens + maxKeys * TOKENS_PER_KEY + TOKENS_PER_ENTRY_OVERHEAD;
+    const answer = perEntry * Math.max(1, entries) + 512;
+    return Math.min(RESPONSE_MAX, Math.max(RESPONSE_MIN, answer + REASONING_HEADROOM));
+}
+
+/**
+ * Pull a JSON object out of a model reply.
+ *
+ * A structured-output request hands back a parsed object already, and the
+ * rest arrives as text that may be wrapped in fences, prefaced with chatter,
+ * preceded by a whole paragraph of visible reasoning, or cut off mid-string.
+ * Every one of those is recovered from here rather than costing a request.
+ *
+ * @param {string|object} text
  * @returns {{ok: true, value: object} | {ok: false, error: string}}
  */
 export function extractJson(text) {
+    // A schema-constrained reply is already an object. Nothing to salvage and
+    // nothing to guess at: this is the path that is supposed to be boring.
+    if (text && typeof text === 'object' && !Array.isArray(text)) {
+        return { ok: true, value: text };
+    }
+
     let source = String(text ?? '').trim();
     if (!source) return { ok: false, error: 'empty reply' };
 
-    // Strip markdown fences, including the ```json opener.
-    source = source.replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '').trim();
+    // Visible chain-of-thought, in the several shapes it arrives in. Left in
+    // place it puts braces and quotes in front of the answer, and everything
+    // downstream then tries to parse the thinking instead of the reply.
+    source = source
+        .replace(/<(think|thinking|reasoning|thought)>[\s\S]*?<\/\1>/gi, '')
+        .replace(/^[\s\S]*?<\/(?:think|thinking|reasoning|thought)>/i, '')
+        .trim();
 
-    const start = source.indexOf('{');
-    if (start < 0) return { ok: false, error: 'no JSON object in the reply' };
-    source = source.slice(start);
+    // Fenced blocks anywhere in the reply, not only wrapping the whole of it:
+    // "Here is the JSON:\n```json\n{...}\n```\nHope that helps" is the single
+    // most common way a chatty model returns a perfectly good object.
+    const candidates = [];
+    for (const match of source.matchAll(/```[a-z]*\s*([\s\S]*?)```/gi)) {
+        const body = match[1].trim();
+        if (body) candidates.push(body);
+    }
+    candidates.push(source.replace(/^```[a-z]*\s*/i, '').replace(/```\s*$/, '').trim());
 
-    const direct = tryParse(source);
-    if (direct.ok) return direct;
+    let lastError = 'no JSON object in the reply';
 
-    const balanced = balance(source);
-    if (balanced !== source) {
-        const repaired = tryParse(balanced);
-        if (repaired.ok) return repaired;
+    for (const candidate of candidates) {
+        const start = candidate.indexOf('{');
+        if (start < 0) continue;
+        const body = candidate.slice(start);
+
+        const direct = tryParse(body);
+        if (direct.ok) return direct;
+        lastError = direct.error;
+
+        const balanced = balance(body);
+        if (balanced !== body) {
+            const repaired = tryParse(balanced);
+            if (repaired.ok) return repaired;
+        }
+
+        // Trailing commas are the single most common malformation, and an
+        // unterminated final string the second: a reply that stopped mid-word
+        // is closed off here so the entries before it survive.
+        const patched = balance(closeString(body).replace(/,(\s*[}\]])/g, '$1'));
+        const retry = tryParse(patched);
+        if (retry.ok) return retry;
     }
 
-    // Trailing commas are the single most common malformation.
-    const decommaed = balance(source.replace(/,(\s*[}\]])/g, '$1'));
-    const retry = tryParse(decommaed);
-    if (retry.ok) return retry;
+    return { ok: false, error: lastError };
+}
 
-    return { ok: false, error: direct.error };
+/**
+ * Close a string left open by a reply that ran out of tokens mid-sentence.
+ * `balance` can only cut back to the last complete entry once the quote is
+ * shut; until then every brace after it looks like part of the text.
+ */
+function closeString(source) {
+    let inString = false;
+    let escaped = false;
+
+    for (const character of source) {
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (character === '\\') escaped = true;
+            else if (character === '"') inString = false;
+            continue;
+        }
+        if (character === '"') inString = true;
+    }
+
+    if (!inString) return source;
+    // A trailing backslash would escape the quote being added.
+    return `${source.replace(/\\+$/, '')}"`;
 }
 
 function tryParse(source) {
@@ -476,15 +684,25 @@ function tryParse(source) {
 }
 
 /**
- * Cut a truncated reply back to the last complete element and close every
- * open bracket, so a response that ran out of tokens still yields entries.
+ * Close off a reply that ran out of tokens, so the entries it did finish
+ * still arrive.
+ *
+ * The brackets still open at the end of the text are tracked on a stack and
+ * shut in reverse, which is the whole trick. An earlier version cut back to
+ * the last complete entry object first and gave up when there wasn't one —
+ * so a reply truncated inside its *first* entry was thrown away entirely,
+ * which is exactly the case a small batch produces. Now the half-written
+ * entry is closed where it stands; it may end mid-sentence, and the user is
+ * about to read it in the review step anyway.
+ *
+ * A trailing comma or a dangling `"key":` left by the cut would still be a
+ * syntax error, so both are trimmed before the brackets go on.
  */
 function balance(source) {
-    let depthCurly = 0;
-    let depthSquare = 0;
+    const stack = [];
     let inString = false;
     let escaped = false;
-    let lastSafe = -1;
+    let end = source.length;
 
     for (let index = 0; index < source.length; index++) {
         const character = source[index];
@@ -497,40 +715,34 @@ function balance(source) {
         }
 
         if (character === '"') inString = true;
-        else if (character === '{') depthCurly++;
-        else if (character === '}') depthCurly--;
-        else if (character === '[') depthSquare++;
-        else if (character === ']') depthSquare--;
-
-        // A closing brace at array depth 1 ends one complete entry object.
-        if (character === '}' && depthCurly >= 1) lastSafe = index;
-        if (depthCurly === 0 && index > 0) return source.slice(0, index + 1);
-    }
-
-    if (!inString && depthCurly === 0 && depthSquare === 0) return source;
-    if (lastSafe < 0) return source;
-
-    let truncated = source.slice(0, lastSafe + 1);
-
-    // Recount what is still open after the cut and close it.
-    let curly = 0;
-    let square = 0;
-    let string = false;
-    let escape = false;
-    for (const character of truncated) {
-        if (string) {
-            if (escape) escape = false;
-            else if (character === '\\') escape = true;
-            else if (character === '"') string = false;
-            continue;
+        else if (character === '{' || character === '[') stack.push(character);
+        else if (character === '}' || character === ']') {
+            stack.pop();
+            // The outermost object closed: anything after it is commentary.
+            if (!stack.length) {
+                end = index + 1;
+                break;
+            }
         }
-        if (character === '"') string = true;
-        else if (character === '{') curly++;
-        else if (character === '}') curly--;
-        else if (character === '[') square++;
-        else if (character === ']') square--;
     }
-    truncated += ']'.repeat(Math.max(0, square)) + '}'.repeat(Math.max(0, curly));
+
+    if (!inString && !stack.length) return source.slice(0, end);
+
+    let truncated = source.slice(0, end);
+    // An unterminated string has to be shut before the brackets, or the
+    // closers would be swallowed as more text.
+    if (inString) truncated = `${truncated.replace(/\\+$/, '')}"`;
+
+    // A cut lands anywhere: after a comma, after a key and its colon, or in
+    // the whitespace between. All three are syntax errors on their own.
+    truncated = truncated
+        .replace(/\s*$/, '')
+        .replace(/,\s*$/, '')
+        .replace(/,?\s*"[^"]*"\s*:\s*$/, '');
+
+    for (let index = stack.length - 1; index >= 0; index--) {
+        truncated += stack[index] === '{' ? '}' : ']';
+    }
     return truncated;
 }
 
@@ -605,7 +817,7 @@ export function stripOwner(title, names = []) {
  * @returns {{ok: true, entries: object[], keyless: number} | {ok: false, error: string}}
  */
 export function normalizeEntries(value, options = {}) {
-    const list = Array.isArray(value?.entries) ? value.entries : Array.isArray(value) ? value : null;
+    const list = entryList(value);
     if (!list) return { ok: false, error: '"entries" is missing or not an array' };
 
     const entries = [];
@@ -641,6 +853,36 @@ export function normalizeEntries(value, options = {}) {
     return { ok: true, entries, keyless };
 }
 
+/**
+ * Find the array of entries in whatever the model wrapped it in.
+ *
+ * The schema asks for `{ "entries": [...] }` and that is what constrained
+ * backends return. The unconstrained ones return a bare array, or `rooms`, or
+ * `lorebook`, or one entry as a naked object — all of which are the answer,
+ * and none of which is worth a second request to correct.
+ *
+ * @param {any} value
+ * @returns {object[]|null}
+ */
+function entryList(value) {
+    if (Array.isArray(value)) return value;
+    if (!value || typeof value !== 'object') return null;
+
+    for (const key of ['entries', 'rooms', 'zones', 'items', 'lorebook', 'results']) {
+        if (Array.isArray(value[key])) return value[key];
+    }
+
+    // A single entry returned unwrapped. It has the fields of one, so it is
+    // one, and refusing it over its packaging helps nobody.
+    if (value.content || value.title) return [value];
+
+    // One unrecognised key holding the array is still unambiguous.
+    const arrays = Object.values(value).filter(Array.isArray);
+    if (arrays.length === 1) return arrays[0];
+
+    return null;
+}
+
 const CYRILLIC = /[А-Яа-яЁё]/;
 
 /**
@@ -655,24 +897,79 @@ function isRejectedScript(spec, englishOnly) {
 }
 
 /**
+ * Read one keyword string in the compact form the prompt asks for.
+ *
+ *   kitchen            → stem
+ *   =hall              → exact word
+ *   couch|sofa|settee  → group of synonyms
+ *   The Drowned Crow   → proper noun, spaces and all
+ *
+ * The prefix is the whole grammar. Asking for an object per keyword was three
+ * times the tokens and the field models most often malformed; a bare string
+ * is something even a small model gets right, and everything the objects
+ * could express is still reachable from here.
+ *
+ * @param {string} text
+ * @returns {object|null}
+ */
+function parseKeyString(text) {
+    let value = String(text ?? '').replace(/\s+/g, ' ').trim();
+    if (!value) return null;
+
+    // Models like to wrap or annotate: "stem: кухн", "/kitchen/i", "**hall**".
+    value = value
+        .replace(/^(?:stem|exact|group|suffix|proper)\s*:\s*/i, match => (/exact/i.test(match) ? '=' : ''))
+        .replace(/^\/(.+)\/[a-z]*$/i, '$1')
+        .replace(/^\*+|\*+$/g, '')
+        .trim();
+    if (!value) return null;
+
+    let mode = 'stem';
+    if (value.startsWith('=')) {
+        mode = 'exact';
+        value = value.slice(1).trim();
+    }
+    if (!value) return null;
+
+    if (value.includes('|')) {
+        const values = value.split('|').map(part => part.trim()).filter(Boolean);
+        if (!values.length) return null;
+        // A synonym written with spaces cannot be a pattern member; it is a
+        // proper noun that wandered into the list, so it is kept as one.
+        if (values.some(part => /\s/.test(part))) {
+            return { mode: 'proper', value: values[0] };
+        }
+        return values.length > 1 ? { mode: 'group', values } : { mode, value: values[0] };
+    }
+
+    if (/\s/.test(value)) return { mode: 'proper', value };
+    return { mode, value };
+}
+
+/**
  * Coerce whatever the model called a key into the spec shape keys.js expects.
+ *
+ * Strings are the documented form now; the object shape is still read because
+ * a model that saw the older contract, or simply likes objects, returns one,
+ * and a reply is not worth rejecting over the packaging of its keywords.
  *
  * The cap is applied last, after rejects are dropped. Slicing first meant a
  * model that led with Russian in English-only mode spent the whole allowance
  * on specs that were then discarded, leaving the entry with no keys at all.
  */
 function normalizeKeySpecs(raw, englishOnly) {
-    const list = Array.isArray(raw) ? raw : [];
+    const list = Array.isArray(raw)
+        ? raw
+        // "kitchen, кухн, =hall" — one string where an array was asked for.
+        : typeof raw === 'string' ? raw.split(/[,\n]/) : [];
     const specs = [];
 
     for (const item of list) {
         if (specs.length >= MAX_KEYS_PER_ENTRY) break;
 
         if (typeof item === 'string') {
-            const value = item.trim();
-            if (!value) continue;
-            const spec = { mode: /\s/.test(value) ? 'proper' : 'stem', value };
-            if (!isRejectedScript(spec, englishOnly)) specs.push(spec);
+            const spec = parseKeyString(item);
+            if (spec && !isRejectedScript(spec, englishOnly)) specs.push(spec);
             continue;
         }
         if (!item || typeof item !== 'object') continue;

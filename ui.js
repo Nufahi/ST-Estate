@@ -12,6 +12,7 @@ import { language, t } from './i18n.js';
 import { chatLorebook, listLorebooks } from './lorebook.js';
 import { openSuggestions } from './suggest.js';
 import {
+    BATCH_LIMITS,
     BINDINGS,
     COVER_ITEMS_MAX,
     COVER_MAX,
@@ -401,6 +402,25 @@ function buildOutputSection(settings, brief) {
     const granularityField = field(t('granularity'), granularity.row);
     granularityField.appendChild(splitHint);
 
+    // How many entries one request carries. This is the setting that decides
+    // whether a big place comes back at all: a model asked for eleven rooms
+    // at once truncates somewhere in the middle and the whole reply is lost,
+    // where four small requests all land. Only meaningful when split by room.
+    const batchSize = input('number', {
+        min: BATCH_LIMITS.min,
+        max: BATCH_LIMITS.max,
+        step: 1,
+        value: settings.entriesPerRequest,
+    });
+    batchSize.classList.add('est-number');
+    const batchField = field(t('batchSize'), batchSize, t('batchSizeHint'));
+
+    const syncBatch = () => {
+        batchField.hidden = granularity.value() !== 'rooms';
+    };
+    for (const item of granularity.buttons) item.addEventListener('click', syncBatch);
+    syncBatch();
+
     const keyLanguage = segmented([
         { id: 'both', label: t('keyLangBoth') },
         { id: 'en', label: t('keyLangEn') },
@@ -414,6 +434,7 @@ function buildOutputSection(settings, brief) {
         detailHint,
         detailWordsField,
         granularityField,
+        batchField,
         field(t('keyLanguage'), keyLanguage.row, t('keyLanguageHint')),
         hint(t('languageNote')),
     );
@@ -435,6 +456,7 @@ function buildOutputSection(settings, brief) {
             settings.detail = detail.value();
             settings.detailWords = clampInt(detailWords.value, DETAIL_WORD_LIMITS, settings.detailWords);
             settings.granularity = granularity.value();
+            settings.entriesPerRequest = clampInt(batchSize.value, BATCH_LIMITS, settings.entriesPerRequest);
             settings.keyLanguage = keyLanguage.value();
         },
     };

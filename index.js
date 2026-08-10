@@ -7,7 +7,7 @@
 import { is_send_press } from '/script.js';
 import { paintIcons } from './icon.js';
 import { t } from './i18n.js';
-import { buildRequest, extractJson, normalizeEntries } from './prompt.js';
+import { buildRequest, extractJson, normalizeEntries, planChunks } from './prompt.js';
 import { openPreview } from './preview.js';
 import { buildLorebookName, DEPTH, ORDER, readBoundLore, writeEntries } from './lorebook.js';
 import { defaultNameTemplate, defaultSectionState, getSettings, resolveProfileId, saveBrief, saveSettings } from './settings.js';
@@ -96,24 +96,36 @@ function cancelGeneration() {
 }
 
 async function generateViaMainApi(ctx, request) {
-    return String(await ctx.generateRaw({
+    const reply = await ctx.generateRaw({
         prompt: request.prompt,
         responseLength: request.responseLength,
         trimNames: false,
-    }) || '');
+        // With a schema, SillyTavern hands back the JSON string the provider
+        // was constrained to produce, rather than whatever the model felt
+        // like typing around it.
+        jsonSchema: request.jsonSchema || undefined,
+    });
+    return typeof reply === 'string' ? reply : reply ?? '';
 }
 
 async function generateViaProfile(ctx, profileId, request, signal) {
     const service = ctx.ConnectionManagerRequestService;
     if (!service) throw new Error('Connection Manager is not available.');
+
+    // `sendRequest` forwards anything in the override payload straight into
+    // the completion body, which is the only way a schema reaches a profile.
+    const overrides = request.jsonSchema ? { json_schema: request.jsonSchema } : {};
     const result = await service.sendRequest(profileId, request.prompt, request.responseLength, {
         stream: false,
         extractData: true,
         includePreset: true,
         signal,
-    });
+    }, overrides);
     signal.throwIfAborted();
-    return String(result?.content || '');
+
+    // A schema-constrained reply comes back parsed; everything else is text.
+    const content = result?.content;
+    return content && typeof content === 'object' ? content : String(content || '');
 }
 
 async function runGeneration(ctx, settings, profileId, options) {
@@ -122,6 +134,38 @@ async function runGeneration(ctx, settings, profileId, options) {
         ? await generateViaProfile(ctx, profileId, request, activeAbort.signal)
         : await generateViaMainApi(ctx, request);
     return { reply, request };
+}
+
+/**
+ * Whether a failure is the provider refusing a structured-output request.
+ *
+ * Not every backend takes a schema, and the ones that do not say so in a
+ * dozen different ways. Rather than keep a list of which providers support
+ * what — a list that would be wrong within a month — the schema is tried and
+ * the refusal is read.
+ */
+function isSchemaRejection(error) {
+    const text = [error?.message, error?.error?.message, error?.cause?.message, error?.responseText]
+        .map(value => String(value || ''))
+        .join(' ')
+        .toLowerCase();
+    return /json_schema|json schema|response_format|structured output|schema is not supported|unsupported.*schema/.test(text);
+}
+
+/**
+ * Whether the model burned its whole output allowance before answering.
+ *
+ * Reasoning models do this and providers report it as a hard error rather
+ * than a short reply: "the output token limit was exhausted by model
+ * reasoning before an answer was produced". The only useful response is to
+ * ask again with a bigger ceiling, which is what the caller does with this.
+ */
+function isTokenLimitError(error) {
+    const text = [error?.message, error?.error?.message, error?.cause?.message, error?.responseText]
+        .map(value => String(value || ''))
+        .join(' ')
+        .toLowerCase();
+    return /token limit was exhausted|exhausted by model reasoning|max_tokens|maximum.*tokens|increase max_tokens|finish_reason.*length/.test(text);
 }
 
 /**
@@ -168,7 +212,52 @@ function ownerNames(ctx, job) {
 }
 
 /**
- * One place: a request, and when the reply is unusable, one retry.
+ * One request, with the two recoveries that do not need a second opinion.
+ *
+ * A provider that will not take a schema is asked again without one, and a
+ * model that spent its whole allowance thinking is asked again with a bigger
+ * one. Neither is a failure the user should have to read about: both are the
+ * same request, sent again with a setting corrected.
+ *
+ * @returns {Promise<{reply: string|object, request: object, noSchema: boolean}>}
+ */
+async function attemptGeneration(ctx, job, profileId, options) {
+    let noSchema = options.noSchema === true;
+
+    try {
+        const result = await runGeneration(ctx, job, profileId, { ...options, noSchema });
+        return { ...result, noSchema };
+    } catch (error) {
+        if (isCancellation(error)) throw error;
+
+        if (!noSchema && isSchemaRejection(error)) {
+            warn('structured output refused, retrying without a schema', error);
+            noSchema = true;
+            activeAbort.signal.throwIfAborted();
+            const result = await runGeneration(ctx, job, profileId, { ...options, noSchema });
+            return { ...result, noSchema };
+        }
+
+        if (isTokenLimitError(error) && !options.raised) {
+            // The ceiling was sized for the answer and the model spent it on
+            // reasoning. Raising it is the documented fix, and the only one
+            // available from this side of the API. `raised` stops the retry
+            // retrying itself: a model that thinks past 32k will not be
+            // talked round, and the loop would only bill for the attempt.
+            warn('output limit exhausted, retrying with a larger budget', error);
+            publish({ stage: t('retryingBudget') });
+            activeAbort.signal.throwIfAborted();
+            const budget = Math.min(32768, Math.max(16384, (options.budget || 4096) * 2));
+            const result = await runGeneration(ctx, job, profileId, { ...options, noSchema, budget, raised: true });
+            return { ...result, noSchema };
+        }
+
+        throw error;
+    }
+}
+
+/**
+ * One slice of one place: a request, and when the reply is unusable, one retry.
  *
  * @returns {Promise<{ok: true, entries: object[], keyless: number} | {ok: false, error: string}>}
  */
@@ -178,7 +267,7 @@ async function generatePass(ctx, job, profileId, options) {
         names: ownerNames(ctx, job),
     };
 
-    let attempt = await runGeneration(ctx, job, profileId, options);
+    let attempt = await attemptGeneration(ctx, job, profileId, options);
     let parsed = extractJson(attempt.reply);
     let normalized = parsed.ok ? normalizeEntries(parsed.value, parseOptions) : { ok: false, error: parsed.error };
 
@@ -193,7 +282,16 @@ async function generatePass(ctx, job, profileId, options) {
         publish({ stage: t(normalized.ok ? 'retryingKeys' : 'retrying') });
         activeAbort.signal.throwIfAborted();
 
-        const retry = await runGeneration(ctx, job, profileId, { ...options, repair: repairReason });
+        // The retry carries the same schema decision the first pass ended on:
+        // rediscovering that a backend has no structured output, once per
+        // retry, is a request spent learning what is already known.
+        const retry = await attemptGeneration(ctx, job, profileId, {
+            ...options,
+            noSchema: attempt.noSchema,
+            repair: repairReason,
+            // A first pass that parsed but ran out of room gets more of it.
+            budget: normalized.ok ? options.budget : Math.min(32768, (attempt.request.responseLength || 4096) + 4096),
+        });
         const retryParsed = extractJson(retry.reply);
         const retryNormalized = retryParsed.ok
             ? normalizeEntries(retryParsed.value, parseOptions)
@@ -210,6 +308,44 @@ async function generatePass(ctx, job, profileId, options) {
 
     if (!normalized.ok) console.debug(`[${TAG}] raw reply:`, attempt.reply);
     return normalized;
+}
+
+/**
+ * One place, written in as many requests as it takes.
+ *
+ * A brief split by room used to be a single request carrying eleven entries,
+ * and that is what has been coming back truncated: the reply is thousands of
+ * tokens of JSON and one bad character anywhere in it costs the lot. Here it
+ * is a handful of small requests instead, and a batch that fails costs only
+ * its own rooms.
+ *
+ * @returns {Promise<{entries: object[], keyless: number, failed: number, error: string}>}
+ */
+async function generatePlace(ctx, job, profileId, options, onProgress) {
+    const chunks = planChunks(job);
+    const entries = [];
+    let keyless = 0;
+    let failed = 0;
+    let error = '';
+
+    for (const chunk of chunks) {
+        activeAbort.signal.throwIfAborted();
+        onProgress?.(chunk);
+
+        const result = await generatePass(ctx, job, profileId, { ...options, chunk });
+
+        if (!result.ok) {
+            failed++;
+            error = result.error;
+            warn(`batch ${chunk.index + 1}/${chunk.total} unusable`, result.error);
+            continue;
+        }
+
+        entries.push(...result.entries);
+        keyless += result.keyless;
+    }
+
+    return { entries, keyless, failed, error };
 }
 
 /**
@@ -289,6 +425,7 @@ async function generateEstate(settings, brief, places) {
         const entries = [];
         let keyless = 0;
         let failures = 0;
+        let partial = 0;
         let lastError = '';
 
         for (let index = 0; index < jobs.length; index++) {
@@ -298,11 +435,21 @@ async function generateEstate(settings, brief, places) {
             // `stage` is cleared with the step: a retry notice left over from
             // the previous place would otherwise sit there for the whole run.
             publish({ done: index, stage: '' });
-            if (jobs.length > 1) publish({ stage: t('generatingPlace', { name: job.placeName }) });
 
-            const result = await generatePass(ctx, job, profileId, { lore });
+            // What the caption says depends on how many things are being
+            // counted. One place split into batches counts batches; several
+            // places count places, and their batches would only be noise.
+            const caption = chunk => {
+                if (jobs.length > 1) return t('generatingPlace', { name: job.placeName });
+                if (chunk.total > 1) return t('generatingBatch', { n: chunk.index + 1, total: chunk.total });
+                return '';
+            };
 
-            if (!result.ok) {
+            const result = await generatePlace(ctx, job, profileId, { lore }, chunk => {
+                publish({ stage: caption(chunk) });
+            });
+
+            if (!result.entries.length) {
                 // One bad place out of several is not worth throwing the rest
                 // away for: the buildings that did come back are still wanted.
                 failures++;
@@ -310,6 +457,10 @@ async function generateEstate(settings, brief, places) {
                 warn(`place ${index + 1}/${jobs.length} unusable`, result.error);
                 continue;
             }
+
+            // A place that lost a batch but kept the others is a partial
+            // success, and the entries that arrived are still worth writing.
+            if (result.failed) partial += result.failed;
 
             // The origin travels with the entry rather than with the run: one
             // review can now hold three buildings, and each row has to know
@@ -326,6 +477,7 @@ async function generateEstate(settings, brief, places) {
         }
 
         if (failures) toastr.warning(t('toastPlaceFailed', { n: failures, total: jobs.length }), t('title'));
+        if (partial) toastr.warning(t('toastBatchFailed', { n: partial }), t('title'));
 
         if (keyless) {
             warn('entries without keywords', keyless);
@@ -432,9 +584,28 @@ async function suggestPlaces(settings, brief) {
 
         const job = { ...settings, ...brief };
         const request = buildSuggestRequest(job, { lore, count: settings.suggestCount });
-        const reply = profileId
-            ? await generateViaProfile(ctx, profileId, request, activeAbort.signal)
-            : await generateViaMainApi(ctx, request);
+
+        const send = async attempt => (profileId
+            ? await generateViaProfile(ctx, profileId, attempt, activeAbort.signal)
+            : await generateViaMainApi(ctx, attempt));
+
+        let reply;
+        try {
+            reply = await send(request);
+        } catch (error) {
+            if (isCancellation(error)) throw error;
+            // The same two recoveries the main path makes: a backend with no
+            // structured output, and a reasoning model that thought its way
+            // through the entire allowance before writing a word.
+            if (!isSchemaRejection(error) && !isTokenLimitError(error)) throw error;
+            warn('scouting request refused, retrying plainly', error);
+            activeAbort.signal.throwIfAborted();
+            reply = await send({
+                ...request,
+                jsonSchema: null,
+                responseLength: Math.min(32768, request.responseLength * 2),
+            });
+        }
 
         const parsed = extractJson(reply);
         const normalized = parsed.ok ? normalizeSuggestions(parsed.value) : { ok: false, error: parsed.error };

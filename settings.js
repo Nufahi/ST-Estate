@@ -70,6 +70,16 @@ export const HISTORY_LIMITS = Object.freeze({ min: 0, max: 200 });
  * suggest.js would only be a cycle.
  */
 export const SUGGEST_LIMITS = Object.freeze({ min: 3, max: 12 });
+
+/**
+ * How many entries one request may carry when a place is split by room.
+ *
+ * Asking for eleven rooms in one reply is thousands of tokens of JSON, and a
+ * single unescaped quote or one token short of the closing brace costs the
+ * whole batch. Smaller batches are more requests and more waiting, and they
+ * arrive; the bound is here so the impatient can still ask for one big one.
+ */
+export const BATCH_LIMITS = Object.freeze({ min: 1, max: 12 });
 export const NAME_MAX = 60;
 const INSTRUCTION_MAX = 4000;
 const EXTRA_MAX = 2000;
@@ -112,6 +122,7 @@ const DEFAULTS = Object.freeze({
     useHistory: false,
     historyCount: 20,
     suggestCount: 6,
+    entriesPerRequest: 3,
     instruction: DEFAULT_INSTRUCTION,
     customTags: {},
 });
@@ -303,6 +314,7 @@ export function getSettings() {
         useHistory: typeof raw.useHistory === 'boolean' ? raw.useHistory : DEFAULTS.useHistory,
         historyCount: clampInt(raw.historyCount, HISTORY_LIMITS, DEFAULTS.historyCount),
         suggestCount: clampInt(raw.suggestCount, SUGGEST_LIMITS, DEFAULTS.suggestCount),
+        entriesPerRequest: clampInt(raw.entriesPerRequest, BATCH_LIMITS, DEFAULTS.entriesPerRequest),
         instruction: normalizeText(raw.instruction, INSTRUCTION_MAX, DEFAULT_INSTRUCTION),
     };
 

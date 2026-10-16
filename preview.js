@@ -10,6 +10,8 @@ import { button, node, textarea } from './dom.js';
 import { buildingIcon, houseIcon } from './icon.js';
 import { t } from './i18n.js';
 import { compileKeys, describeKey } from './keys.js';
+import { existingEntries } from './lorebook.js';
+import { installReviewTools } from './review-tools.js';
 
 const KIND_LABEL = {
     stem: 'keyStem',
@@ -121,6 +123,9 @@ function buildEntryCard(entry, index, onChange) {
     const recompile = () => {
         const specs = keys.value.split('\n').map(lineToSpec).filter(Boolean);
         const result = compileKeys(specs);
+        if (entry.room !== 'whole' && entry.origin?.place) {
+            result.keys = result.keys.filter(key => key.toLowerCase() !== entry.origin.place.toLowerCase());
+        }
 
         compiled.replaceChildren();
         for (const key of result.keys) {
@@ -164,7 +169,17 @@ function buildEntryCard(entry, index, onChange) {
     return {
         element,
         enabled: () => toggle.checked,
+        draft: () => ({ ...entry, title: title.value, content: content.value, visual: visual.value, keys: keys.value.split('\n').map(lineToSpec).filter(Boolean) }),
+        apply: next => {
+            title.value = next.title;
+            content.value = next.content;
+            visual.value = next.visual || '';
+            keys.value = next.keys.map(specToLine).join('\n');
+            recompile();
+            onChange();
+        },
         read: () => ({
+            ...entry,
             title: title.value.trim() || entry.title,
             room: entry.room,
             content: content.value.trim(),
@@ -190,6 +205,7 @@ function buildEntryCard(entry, index, onChange) {
  */
 export async function openPreview(entries, destination, onWrite) {
     const context = SillyTavern.getContext();
+    const existing = destination.isNew ? [] : await existingEntries(destination.book);
     const root = node('div', 'est-preview');
 
     const title = node('div', 'est-title');
@@ -245,6 +261,9 @@ export async function openPreview(entries, destination, onWrite) {
     });
 
     updateSummary();
+    const tools = installReviewTools({ root, cards, destination, existing, stamp: 'estate',
+        setBusy: busy => { root.classList.toggle('est-preview--busy', busy); updateSummary(); },
+    });
 
     const popup = new context.Popup(root, context.POPUP_TYPE.TEXT, '', {
         wide: true,
@@ -259,6 +278,7 @@ export async function openPreview(entries, destination, onWrite) {
     let written = false;
 
     write.addEventListener('click', async () => {
+        if (tools.busy() || root.classList.contains('est-preview--busy')) return;
         const selected = cards
             .filter(entry => entry.enabled())
             .map(entry => entry.read())
@@ -272,7 +292,7 @@ export async function openPreview(entries, destination, onWrite) {
         root.classList.add('est-preview--busy');
         write.disabled = true;
         try {
-            written = await onWrite(selected);
+            written = await onWrite(selected, tools.mode());
         } catch (error) {
             console.error('[Estate] write', error);
             written = false;

@@ -1,9 +1,8 @@
 /**
  * Estate — lorebook writing.
  *
- * Entries are always created through SillyTavern's own `createWorldInfoEntry`,
- * so the shape stays correct as the entry schema grows. Existing entries are
- * never touched: Estate only appends.
+ * New entries use SillyTavern's native entry factory. Updates are restricted
+ * to Estate-stamped entries, by stable identity or explicit review selection.
  */
 
 import {
@@ -19,6 +18,7 @@ import {
 } from '../../../world-info.js';
 import { user_avatar } from '../../../personas.js';
 import { NAME_MAX } from './settings.js';
+import { entryIdentity, selectLore } from './workflow.js';
 
 /** Marker written on every entry Estate creates, for later identification. */
 export const STAMP = 'estate';
@@ -105,8 +105,7 @@ export function chatLorebook() {
  *
  * @returns {string[]}
  */
-export function characterLorebooks() {
-    const context = ctx();
+export function characterLorebooks(context = ctx()) {
     const names = [];
 
     const character = context.characters?.[context.characterId];
@@ -125,29 +124,21 @@ export function characterLorebooks() {
     return [...new Set(names)];
 }
 
-/** Cap on how much lorebook text is worth feeding back into a prompt. */
-const SOURCE_ENTRY_MAX = 600;
-const SOURCE_TOTAL_MAX = 6000;
-const SOURCE_ENTRIES_MAX = 40;
-
 /**
  * Read the lorebooks attached to this chat and character as source material.
  *
- * Entries Estate wrote itself are skipped: feeding a generated description
- * back in as reference makes every later run a copy of the first.
+ * Include earlier generated entries and the destination; rank before clipping
+ * so large memory books cannot displace all character/location material.
  *
  * @returns {Promise<string>} plain text, empty when there is nothing to read
  */
-export async function readBoundLore() {
-    const names = [...new Set([chatLorebook(), ...characterLorebooks()].filter(Boolean))];
+export async function readBoundLore(context = ctx(), query = '', destination = '') {
+    const names = [...new Set([context.chatMetadata?.[METADATA_KEY], ...characterLorebooks(context), destination].filter(Boolean))];
     if (!names.length) return '';
 
-    const pieces = [];
-    let budget = SOURCE_TOTAL_MAX;
-    let count = 0;
+    const candidates = [];
 
     for (const name of names) {
-        if (budget <= 0 || count >= SOURCE_ENTRIES_MAX) break;
 
         let data;
         try {
@@ -159,24 +150,17 @@ export async function readBoundLore() {
         if (!data?.entries || typeof data.entries !== 'object') continue;
 
         for (const entry of Object.values(data.entries)) {
-            if (budget <= 0 || count >= SOURCE_ENTRIES_MAX) break;
             if (!entry || entry.disable) continue;
-            if (entry[`${STAMP}_created`]) continue;
 
             const body = String(entry.content || '').replace(/\s+/g, ' ').trim();
             if (!body) continue;
 
             const label = String(entry.comment || '').replace(/\s+/g, ' ').trim();
-            const text = label ? `${label}: ${body}` : body;
-            const clipped = text.slice(0, Math.min(SOURCE_ENTRY_MAX, budget));
-
-            pieces.push(clipped);
-            budget -= clipped.length;
-            count++;
+            candidates.push({ book: name, label, body });
         }
     }
 
-    return pieces.join('\n\n');
+    return selectLore(candidates, query);
 }
 
 /**
@@ -186,8 +170,7 @@ export async function readBoundLore() {
  * @param {string} template
  * @returns {string}
  */
-export function buildLorebookName(template) {
-    const context = ctx();
+export function buildLorebookName(template, context = ctx()) {
     const source = String(template || '').trim() || 'Estate - {char}';
 
     const name = source
@@ -245,8 +228,7 @@ function attachAuxiliaryBook(context, character, name) {
  * @param {'chat'|'character'|'persona'|'none'} target
  * @returns {Promise<boolean>} whether the binding actually happened
  */
-export async function bindLorebook(name, target) {
-    const context = ctx();
+export async function bindLorebook(name, target, context = ctx()) {
     if (!name || target === 'none') return false;
 
     if (target === 'chat') target = 'character';
@@ -260,10 +242,11 @@ export async function bindLorebook(name, target) {
     }
 
     if (target === 'persona') {
-        const powerUser = context.powerUserSettings;
+        const powerUser = ctx().powerUserSettings;
         if (!powerUser) return false;
-        powerUser.persona_description_lorebook = name;
-        const descriptor = powerUser.persona_descriptions?.[user_avatar];
+        const avatar = context.personaAvatar ?? user_avatar;
+        if (avatar === user_avatar) powerUser.persona_description_lorebook = name;
+        const descriptor = powerUser.persona_descriptions?.[avatar];
         if (descriptor) descriptor.lorebook = name;
         context.saveSettingsDebounced();
         return true;
@@ -317,25 +300,26 @@ export async function writeEntries(entries, options) {
             error.book = name;
             throw error;
         }
+        options.create = false;
+        options.attachAfterSave = true;
         await updateWorldInfoList();
-
-        try {
-            bound = await bindLorebook(name, options.bind || 'none');
-            bindFailed = !bound && !!options.bind && options.bind !== 'none';
-        } catch (error) {
-            console.error('[Estate] binding failed', error);
-            bindFailed = true;
-        }
     }
 
-    const data = await loadWorldInfo(name);
+    const data = structuredClone(await loadWorldInfo(name));
     if (!data) throw new Error(`Could not load the lorebook "${name}".`);
     if (!data.entries || typeof data.entries !== 'object') data.entries = {};
 
     let written = 0;
+    const updated = new Set();
     for (const draft of list) {
-        const entry = createWorldInfoEntry(name, data);
+        const id = draft.ownerId ? entryIdentity(draft) : '';
+        const match = options.writeMode !== 'variant' && Object.values(data.entries).find(item =>
+            item?.[`${STAMP}_created`] && (draft.replaceUid != null ? String(item.uid) === String(draft.replaceUid)
+                : id && item[`${STAMP}_id`] === id));
+        const entry = match || createWorldInfoEntry(name, data);
         if (!entry) continue;
+        if (updated.has(entry.uid)) throw new Error('Two drafts target the same entry. Choose separate destinations or create variants.');
+        updated.add(entry.uid);
 
         // An entry knows which building it describes when the run wrote several;
         // the run's own origin is the fallback for the ordinary single-place case.
@@ -344,7 +328,14 @@ export async function writeEntries(entries, options) {
         entry.comment = decorateTitle(draft.title || 'Home', origin).slice(0, 120);
         entry.content = composeContent(draft);
         entry.key = Array.isArray(draft.keys) ? draft.keys.filter(Boolean) : [];
-        entry.keysecondary = [];
+        if (draft.room !== 'whole' && draft.origin?.place) {
+            entry.key = entry.key.filter(key => key.toLowerCase() !== draft.origin.place.toLowerCase());
+        }
+        entry.keysecondary = draft.scopeKeys || [];
+        entry.selectiveLogic = 0; // AND ANY: topic AND one scope alias.
+        entry.scanDepth = 4;
+        entry.caseSensitive = false;
+        entry.matchWholeWords = false;
 
         // Keyed, depth-anchored entries: present when the place comes up,
         // absent when it does not.
@@ -362,9 +353,13 @@ export async function writeEntries(entries, options) {
         // never be dragged in by another entry's recursion pass.
         entry.excludeRecursion = true;
         entry.preventRecursion = true;
+        for (const field of ['matchPersonaDescription', 'matchCharacterDescription', 'matchCharacterPersonality', 'matchCharacterDepthPrompt', 'matchScenario', 'matchCreatorNotes']) entry[field] = false;
 
         entry.automationId = '';
-        entry[`${STAMP}_created`] = new Date().toISOString();
+        entry[`${STAMP}_created`] ||= new Date().toISOString();
+        entry[`${STAMP}_updated`] = new Date().toISOString();
+        if (id) entry[`${STAMP}_id`] = id;
+        entry[`${STAMP}_owner`] = draft.ownerId || '';
         entry[`${STAMP}_mode`] = origin?.mode === 'place' ? 'place' : 'home';
         if (draft.room) entry[`${STAMP}_room`] = String(draft.room).slice(0, 60);
 
@@ -372,6 +367,13 @@ export async function writeEntries(entries, options) {
     }
 
     await saveWorldInfo(name, data, true);
+    if (options.attachAfterSave) {
+        try {
+            bound = await bindLorebook(name, options.bind || 'none', options.context);
+            bindFailed = !bound && !!options.bind && options.bind !== 'none';
+            options.attachAfterSave = false;
+        } catch (error) { console.error('[Estate] binding failed', error); bindFailed = true; }
+    }
 
     try {
         await Promise.resolve(reloadEditor(name));
@@ -380,4 +382,10 @@ export async function writeEntries(entries, options) {
     }
 
     return { written, name, bound, bindFailed };
+}
+
+export async function existingEntries(name) {
+    if (!name) return [];
+    const data = await loadWorldInfo(name);
+    return Object.values(data?.entries || {}).filter(entry => entry?.[`${STAMP}_created`]);
 }

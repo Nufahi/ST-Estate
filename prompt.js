@@ -288,6 +288,8 @@ export function buildContext(ctx, settings, lore = '') {
     if (settings.useCard && fields.description) {
         parts.push(`CHARACTER CARD\n${clean(fields.description).slice(0, 4000)}`);
     }
+    if (settings.useCard && fields.personality) parts.push(`PERSONALITY\n${clean(fields.personality).slice(0, 2000)}`);
+    if (settings.useCard && fields.scenario) parts.push(`SCENARIO\n${clean(fields.scenario).slice(0, 2000)}`);
     if (settings.usePersona && fields.persona) {
         parts.push(`PERSONA\n${clean(fields.persona).slice(0, 2000)}`);
     }
@@ -333,7 +335,7 @@ export function planChunks(settings) {
 
     if (!perRoom || !parts.length) return [{ rooms: [], whole: true, index: 0, total: 1 }];
 
-    const size = clampChunkSize(settings.entriesPerRequest);
+    const size = Math.min(MAX_ENTRIES - 1, clampChunkSize(settings.entriesPerRequest));
     const rooms = parts.slice(0, MAX_ENTRIES);
 
     const chunks = [];
@@ -368,7 +370,7 @@ function clampChunkSize(value) {
  * @returns {{prompt: Array<{role: string, content: string}>, responseLength: number, mode: 'home'|'place', bilingual: boolean, jsonSchema: object|null, entryCount: number}}
  */
 export function buildRequest(settings, options = {}) {
-    const ctx = SillyTavern.getContext();
+    const ctx = options.context || SillyTavern.getContext();
     const mode = settings.mode === 'place' ? 'place' : 'home';
     const bilingual = settings.keyLanguage !== 'en';
     const counts = bilingual ? KEY_COUNTS.both : KEY_COUNTS.en;
@@ -403,7 +405,7 @@ export function buildRequest(settings, options = {}) {
     const whole = mode === 'place' ? 'building' : 'home';
     const entryPlan = perRoom && parts.length
         ? [
-            `Write one entry per listed ${unit}: ${parts.join(', ')}.`,
+            `Write one entry per listed ${unit}: ${parts.join(', ')}. Copy each listed value EXACTLY into the room field; the overview uses "whole".`,
             wantsWhole
                 ? `Add one short entry titled for the ${whole} as a whole that covers the structure, the approach and the overall impression.`
                 : '',
@@ -504,6 +506,7 @@ export function buildRequest(settings, options = {}) {
         'entry with no keywords can never fire, so it is the field that must not',
         'be the one you run out of room for.',
         schema(bilingual),
+        ...(options.revision ? ['REVISION MODE: disregard the normal entry plan and count. Return exactly one entry as requested in the revision instruction.'] : []),
     ].join('\n');
 
     const userParts = [occupancy.line];
@@ -512,7 +515,7 @@ export function buildRequest(settings, options = {}) {
     // key or the entry never fires when someone says it by name.
     const placeName = mode === 'place' ? clean(settings.placeName) : '';
     if (placeName) {
-        userParts.push(`Include "${placeName}" as a keyword in every entry.`);
+        userParts.push(`Only the whole-building entry may key on "${placeName}". Room entries key on their room or function, never on the building name; location scope is applied separately.`);
     }
 
     if (brief) userParts.push(`BRIEF\n${brief}`);
@@ -520,6 +523,8 @@ export function buildRequest(settings, options = {}) {
 
     const instruction = clean(settings.instruction);
     if (instruction) userParts.push(`ADDITIONAL INSTRUCTION\n${instruction}`);
+    if (options.continuity) userParts.push(`ALREADY ESTABLISHED IN THIS RUN — preserve these facts and layout:\n${options.continuity}`);
+    if (options.revision) userParts.push(options.revision);
 
     if (options.repair) {
         userParts.push(

@@ -5,12 +5,14 @@
  */
 
 import { is_send_press } from '/script.js';
+import { user_avatar } from '../../../personas.js';
+import { snapshotContext, sameChat, normalizeId, continuity, revisionInstruction, checkCoverage } from './workflow.js';
 import { paintIcons } from './icon.js';
 import { t } from './i18n.js';
 import { buildRequest, extractJson, normalizeEntries, planChunks } from './prompt.js';
 import { openPreview } from './preview.js';
 import { buildLorebookName, DEPTH, ORDER, readBoundLore, writeEntries } from './lorebook.js';
-import { defaultNameTemplate, defaultSectionState, getSettings, resolveProfileId, saveBrief, saveSettings } from './settings.js';
+import { defaultNameTemplate, defaultSectionState, getBrief, getSettings, resolveProfileId, saveBrief, saveSettings } from './settings.js';
 import { buildSuggestRequest, normalizeSuggestions } from './suggest.js';
 import { mountUi, openDialog, unmountUi } from './ui.js';
 
@@ -129,10 +131,11 @@ async function generateViaProfile(ctx, profileId, request, signal) {
 }
 
 async function runGeneration(ctx, settings, profileId, options) {
-    const request = buildRequest(settings, options);
+    const request = buildRequest(settings, { ...options, context: ctx });
     const reply = profileId
         ? await generateViaProfile(ctx, profileId, request, activeAbort.signal)
         : await generateViaMainApi(ctx, request);
+    activeAbort.signal.throwIfAborted();
     return { reply, request };
 }
 
@@ -262,6 +265,8 @@ async function attemptGeneration(ctx, job, profileId, options) {
  * @returns {Promise<{ok: true, entries: object[], keyless: number} | {ok: false, error: string}>}
  */
 async function generatePass(ctx, job, profileId, options) {
+    const expected = options.revision ? [] : options.chunk?.rooms?.length
+        ? [...options.chunk.rooms, ...(options.chunk.whole ? ['whole'] : [])] : ['whole'];
     const parseOptions = {
         englishOnly: job.keyLanguage === 'en',
         names: ownerNames(ctx, job),
@@ -270,11 +275,12 @@ async function generatePass(ctx, job, profileId, options) {
     let attempt = await attemptGeneration(ctx, job, profileId, options);
     let parsed = extractJson(attempt.reply);
     let normalized = parsed.ok ? normalizeEntries(parsed.value, parseOptions) : { ok: false, error: parsed.error };
+    checkCoverage(normalized, expected, 'room');
 
     // A reply can parse cleanly and still be useless: entries whose keyword
     // list came back empty never fire once written. Worth another pass.
     const repairReason = normalized.ok
-        ? (normalized.keyless ? `${normalized.keyless} entr(ies) came back with an empty "keys" array` : '')
+        ? [normalized.keyless ? `${normalized.keyless} entries have no keys` : '', normalized.missing.length ? `Missing room IDs: ${normalized.missing.join(', ')}` : ''].filter(Boolean).join('; ')
         : normalized.error;
 
     if (repairReason) {
@@ -296,17 +302,19 @@ async function generatePass(ctx, job, profileId, options) {
         const retryNormalized = retryParsed.ok
             ? normalizeEntries(retryParsed.value, parseOptions)
             : { ok: false, error: retryParsed.error };
+        checkCoverage(retryNormalized, expected, 'room');
 
         // Only take the retry when it is genuinely better: a second pass that
         // parses but loses the keys again should not replace a first pass that
         // at least had some.
-        if (retryNormalized.ok && (!normalized.ok || retryNormalized.keyless < normalized.keyless)) {
+        if (retryNormalized.ok && (!normalized.ok || retryNormalized.keyless + retryNormalized.missing.length < normalized.keyless + normalized.missing.length)) {
             attempt = retry;
             normalized = retryNormalized;
         }
     }
 
     if (!normalized.ok) console.debug(`[${TAG}] raw reply:`, attempt.reply);
+    if (normalized.missing?.length) toastr.warning(t('missingCoverage', { items: normalized.missing.join(', ') }), t('title'));
     return normalized;
 }
 
@@ -332,7 +340,7 @@ async function generatePlace(ctx, job, profileId, options, onProgress) {
         activeAbort.signal.throwIfAborted();
         onProgress?.(chunk);
 
-        const result = await generatePass(ctx, job, profileId, { ...options, chunk });
+        const result = await generatePass(ctx, job, profileId, { ...options, chunk, continuity: continuity(entries) });
 
         if (!result.ok) {
             failed++;
@@ -395,7 +403,9 @@ async function generateEstate(settings, brief, places) {
         return false;
     }
 
-    const ctx = SillyTavern.getContext();
+    const ctx = snapshotContext(SillyTavern.getContext(), user_avatar);
+    settings = structuredClone(settings);
+    brief = structuredClone(brief);
     const profileId = resolveProfileId(settings);
     if (!profileId && ctx.mainApi !== 'openai') {
         toastr.warning(t('toastNoApi'), t('title'));
@@ -416,7 +426,7 @@ async function generateEstate(settings, brief, places) {
         let lore = '';
         if (settings.useLore) {
             try {
-                lore = await readBoundLore();
+                lore = await readBoundLore(ctx, JSON.stringify({ names: [ctx.name1, ctx.name2], jobs }), brief.lorebookName);
             } catch (error) {
                 warn('lorebook context', error);
             }
@@ -466,7 +476,12 @@ async function generateEstate(settings, brief, places) {
             // review can now hold three buildings, and each row has to know
             // which of them it belongs to or every badge would say the last.
             const origin = resolveOrigin(job);
-            for (const entry of applyTiers(result.entries)) entries.push({ ...entry, origin });
+            const owner = job.mode === 'place' ? job.placeName
+                : job.target === 'persona' ? ctx.name1
+                : job.target === 'shared' ? `${ctx.name2} & ${ctx.name1}` : ctx.name2;
+            const ownerId = JSON.stringify([ctx.characters?.[ctx.characterId]?.avatar || ctx.getCurrentChatId?.(), job.mode, job.target, normalizeId(owner)]);
+            const scopeKeys = (job.mode === 'place' ? [job.placeName] : job.target === 'shared' ? [ctx.name1, ctx.name2] : [owner]).filter(Boolean);
+            for (const entry of applyTiers(result.entries)) entries.push({ ...entry, origin, ownerId, scopeKeys, job });
             keyless += result.keyless;
         }
 
@@ -485,21 +500,27 @@ async function generateEstate(settings, brief, places) {
         }
 
         const isNew = brief.createNew || !brief.lorebookName;
-        const book = isNew ? buildLorebookName(settings.nameTemplate) : brief.lorebookName;
+        const book = isNew ? buildLorebookName(settings.nameTemplate, ctx) : brief.lorebookName;
         const mode = jobs.length > 1 ? 'place' : resolveOrigin(jobs[0]).mode;
 
         // The model is done; what remains is the user reading the result. The
         // Stop button has nothing left to stop from here on.
         publish({ phase: 'review', stage: '' });
 
-        return await openPreview(entries, { book, isNew, mode }, async selected => {
+        const writeOptions = { name: book, create: isNew, bind: settings.bind, origin: resolveOrigin(jobs[0]), context: ctx };
+        const regenerate = async (entry, note, siblings) => {
+            if (is_send_press) throw new Error(t('toastBusy'));
+            activeAbort = new AbortController();
+            const result = await generatePass(ctx, { ...entry.job, granularity: 'single' }, profileId, {
+                lore, revision: revisionInstruction(entry, note, siblings),
+            });
+            if (!result.ok || result.entries.length !== 1 || result.keyless) throw new Error(t('toastBadJson'));
+            return { ...entry, ...result.entries[0], room: entry.room };
+        };
+        return await openPreview(entries, { book, isNew, mode, source: lore, regenerate }, async (selected, writeMode) => {
             try {
-                const result = await writeEntries(selected, {
-                    name: book,
-                    create: isNew,
-                    bind: settings.bind,
-                    origin: resolveOrigin(jobs[0]),
-                });
+                writeOptions.writeMode = writeMode;
+                const result = await writeEntries(selected, writeOptions);
 
                 toastr.success(t('toastWritten', { n: result.written, book: result.name }), t('title'));
                 if (result.bound) {
@@ -508,9 +529,10 @@ async function generateEstate(settings, brief, places) {
                 if (result.bindFailed) toastr.warning(t('toastBindFailed'), t('title'));
 
                 // A freshly created book becomes this chat's target next time.
-                if (isNew) {
-                    brief.createNew = false;
-                    brief.lorebookName = result.name;
+                if (isNew && sameChat(ctx)) {
+                    const currentBrief = getBrief();
+                    currentBrief.createNew = false;
+                    currentBrief.lorebookName = result.name;
                     saveBrief();
                 }
                 return true;
@@ -556,7 +578,9 @@ async function suggestPlaces(settings, brief) {
         return null;
     }
 
-    const ctx = SillyTavern.getContext();
+    const ctx = snapshotContext(SillyTavern.getContext(), user_avatar);
+    settings = structuredClone(settings);
+    brief = structuredClone(brief);
     const profileId = resolveProfileId(settings);
     if (!profileId && ctx.mainApi !== 'openai') {
         toastr.warning(t('toastNoApi'), t('title'));
@@ -576,14 +600,14 @@ async function suggestPlaces(settings, brief) {
         let lore = '';
         if (settings.useLore) {
             try {
-                lore = await readBoundLore();
+                lore = await readBoundLore(ctx, JSON.stringify(brief), brief.lorebookName);
             } catch (error) {
                 warn('lorebook context', error);
             }
         }
 
         const job = { ...settings, ...brief };
-        const request = buildSuggestRequest(job, { lore, count: settings.suggestCount });
+        const request = buildSuggestRequest(job, { lore, count: settings.suggestCount, context: ctx });
 
         const send = async attempt => (profileId
             ? await generateViaProfile(ctx, profileId, attempt, activeAbort.signal)
@@ -607,6 +631,7 @@ async function suggestPlaces(settings, brief) {
             });
         }
 
+        activeAbort.signal.throwIfAborted();
         const parsed = extractJson(reply);
         const normalized = parsed.ok ? normalizeSuggestions(parsed.value) : { ok: false, error: parsed.error };
 
@@ -617,6 +642,10 @@ async function suggestPlaces(settings, brief) {
             return null;
         }
 
+        if (!sameChat(ctx)) {
+            toastr.info(t('toastChatChanged'), t('title'));
+            return null;
+        }
         return normalized.places;
     } catch (error) {
         if (isCancellation(error)) {

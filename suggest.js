@@ -63,7 +63,7 @@ function tagMenu() {
  * @returns {{prompt: Array<{role: string, content: string}>, responseLength: number}}
  */
 export function buildSuggestRequest(job, options = {}) {
-    const ctx = SillyTavern.getContext();
+    const ctx = options.context || SillyTavern.getContext();
     const count = Math.min(SUGGEST_LIMITS.max, Math.max(SUGGEST_LIMITS.min, Number(options.count) || 6));
 
     // History is the point of this request, so it is switched on and given a

@@ -31,8 +31,8 @@ keyword patterns that actually fire.
   the model never writes a regex.
 - **Reads the lore you already have.** The lorebooks bound to the chat and to
   the character card are fed in as reference, so a new place fits the world
-  instead of contradicting it. Estate's own entries are skipped, so later runs
-  are not copies of the first.
+  instead of contradicting it. Relevant entries, including earlier Estate
+  material and the destination book, are ranked before clipping.
 - **Review before writing.** Nothing reaches the lorebook until you have seen
   the entries, unchecked what you do not want, and edited the rest.
 - **A separate model.** Route generation through any saved connection profile,
@@ -66,6 +66,24 @@ the entry length, the keyword script, the context toggles, the lorebook name
 template, and any tags you invented yourself — a tag you made up is part of
 your vocabulary, and retyping it in every chat would be the same annoyance
 from the other end.
+
+## Review and revision
+
+- Runs keep a snapshot of the character, persona, messages and brief. Switching
+  chats does not redirect the output or attachment to the new character.
+- **Update matching entries** is the default: stable owner/room identities
+  replace earlier Estate entries in the selected book. **Create additional
+  variants** appends instead. For older entries, choose the target explicitly;
+  only Estate-stamped entries are offered, with their old text for comparison.
+- **Scope aliases** require both a topic keyword and one place/owner alias in
+  the last four messages. Add spelling/language variants, or clear the aliases
+  for topic-only activation. Room entries do not key on the building name alone.
+- Paste sample messages into the keyword tester to see topic/scope matches.
+  This tests matching, not the World Info token budget or scene location.
+- Add a correction and **Regenerate this entry**; **Undo regeneration** restores
+  the previous draft. Other edited drafts are passed as consistency context.
+- The source panel shows selected lore. Later batches receive earlier drafts;
+  missing requested entries trigger one repair attempt and a warning.
 
 ## Keywords
 
@@ -104,8 +122,8 @@ absent when it does not.
 | `excludeRecursion` | `true` | A home description should not drag in other entries |
 | `preventRecursion` | `true` | And should not be dragged in by them |
 
-Entries are appended. Estate never modifies or deletes anything already in a
-lorebook.
+Matching Estate entries are updated by default; missing entries are created
+through SillyTavern's native factory. The variants mode always creates new entries.
 
 ## Where they go
 

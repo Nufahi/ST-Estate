@@ -221,6 +221,8 @@ function attachAuxiliaryBook(context, character, name) {
     const key = String(character?.avatar || '').replace(/\.[^.]+$/, '');
     if (!key || !world_info) return false;
 
+    if (character?.data?.extensions?.world === name) return true;
+
     if (!Array.isArray(world_info.charLore)) world_info.charLore = [];
 
     let record = world_info.charLore.find(entry => entry?.name === key);
@@ -236,7 +238,8 @@ function attachAuxiliaryBook(context, character, name) {
 }
 
 /**
- * Attach a lorebook to the chat, the character card or the active persona.
+ * Attach a lorebook to the character card or the active persona.
+ * Legacy chat requests use the auxiliary card list, never the chat slot.
  *
  * @param {string} name
  * @param {'chat'|'character'|'persona'|'none'} target
@@ -246,30 +249,14 @@ export async function bindLorebook(name, target) {
     const context = ctx();
     if (!name || target === 'none') return false;
 
-    if (target === 'chat') {
-        if (!context.getCurrentChatId?.()) return false;
-        context.chatMetadata[METADATA_KEY] = name;
-        await context.saveMetadata();
-        return true;
-    }
+    if (target === 'chat') target = 'character';
 
     if (target === 'character') {
         const characterId = context.characterId;
         if (characterId === undefined || characterId === null) return false;
 
         const character = context.characters?.[characterId];
-        const primary = String(character?.data?.extensions?.world || '').trim();
-
-        // A card that already has a lorebook keeps it. Overwriting `world`
-        // would silently detach the book the character actually depends on,
-        // so an existing one means Estate's book is attached alongside it.
-        if (primary && primary !== name) {
-            return attachAuxiliaryBook(context, character, name);
-        }
-
-        await context.writeExtensionField(characterId, 'world', name);
-        if (character?.data?.extensions) character.data.extensions.world = name;
-        return true;
+        return attachAuxiliaryBook(context, character, name);
     }
 
     if (target === 'persona') {
@@ -334,6 +321,7 @@ export async function writeEntries(entries, options) {
 
         try {
             bound = await bindLorebook(name, options.bind || 'none');
+            bindFailed = !bound && !!options.bind && options.bind !== 'none';
         } catch (error) {
             console.error('[Estate] binding failed', error);
             bindFailed = true;

@@ -25,7 +25,8 @@ const MODULE_NAME = 'ST-Estate';
 const BRIEF_KEY = 'estate_brief_v1';
 
 export const TARGETS = Object.freeze(['character', 'persona', 'shared']);
-export const BINDINGS = Object.freeze(['chat', 'character', 'persona', 'none']);
+// Reserve the single chat slot for MemoryBooks and other chat-specific lore.
+export const BINDINGS = Object.freeze(['character', 'persona', 'none']);
 
 /**
  * Which scripts keywords are generated in. Entry text is always English;
@@ -109,7 +110,7 @@ const DEFAULT_INSTRUCTION = '';
  */
 const DEFAULTS = Object.freeze({
     nameTemplate: DEFAULT_NAME_TEMPLATE,
-    bind: 'chat',
+    bind: 'character',
     keyLanguage: 'both',
     detail: 'normal',
     detailWords: DETAIL_WORDS.normal,

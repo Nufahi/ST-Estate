@@ -9,7 +9,7 @@ import { MODES, customId, sectionsFor } from './catalog.js';
 import { button, card, checkbox, field, hint, input, node, segmented, select, textarea } from './dom.js';
 import { buildingIcon, houseIcon } from './icon.js';
 import { language, t } from './i18n.js';
-import { chatLorebook, listLorebooks } from './lorebook.js';
+import { listLorebooks } from './lorebook.js';
 import { openSuggestions } from './suggest.js';
 import {
     BATCH_LIMITS,
@@ -318,17 +318,14 @@ function buildOutputSection(settings, brief) {
     const { card: element, body } = card(t('output'));
 
     const books = listLorebooks();
-    const bound = chatLorebook();
     const options = [{ value: NEW_BOOK, label: t('lorebookNew') }];
     for (const name of books) options.push({ value: name, label: name });
 
-    // Which book this chat writes to is part of the brief; the book bound to
-    // the chat is the fallback, which is right for a chat opened for the
-    // first time and never wrong for one that has already answered.
+    // Keep an explicit destination; never default to a chat's memory book.
     const stored = brief.createNew ? NEW_BOOK : brief.lorebookName;
     const initial = options.some(option => option.value === stored)
         ? stored
-        : (bound && books.includes(bound) ? bound : NEW_BOOK);
+        : NEW_BOOK;
 
     const bookSelect = select(options, initial);
     const bookField = field(t('lorebook'), bookSelect, t('lorebookHint'));
@@ -337,11 +334,10 @@ function buildOutputSection(settings, brief) {
     const nameField = field(t('nameTemplate'), nameInput, t('nameTemplateHint'));
 
     const bindSelect = select([
-        { value: 'chat', label: t('bindChat') },
         { value: 'character', label: t('bindCharacter') },
         { value: 'persona', label: t('bindPersona') },
         { value: 'none', label: t('bindNone') },
-    ], BINDINGS.includes(settings.bind) ? settings.bind : 'chat');
+    ], BINDINGS.includes(settings.bind) ? settings.bind : 'character');
     const bindField = field(t('bind'), bindSelect, t('bindHint'));
 
     const syncNew = () => {

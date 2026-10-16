@@ -20,7 +20,7 @@ const SETTINGS_SELECTOR = '.estate-settings';
 
 /** i18n keys naming each binding target, for the confirmation toast. */
 const BIND_LABEL = Object.freeze({
-    chat: 'bindChat',
+    chat: 'bindCharacter', // Legacy binding requests use the auxiliary list.
     character: 'bindCharacter',
     persona: 'bindPersona',
     none: 'bindNone',

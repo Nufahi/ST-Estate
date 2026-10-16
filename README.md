@@ -109,14 +109,15 @@ lorebook.
 
 ## Where they go
 
-By default a new lorebook is created — `Estate - {char}` — and bound to the
-current chat, which leaves the character's own lorebooks untouched. You can
-instead pick an existing lorebook, or bind a new one to the character card or
-the active persona.
+By default a new lorebook is created — `Estate - {char}` — and added to the
+character's auxiliary books in Character Lore. It is active in all chats with
+that character. You can instead pick an existing destination, attach to the
+active persona, or leave the book unattached.
 
-Binding to the card never overwrites a lorebook the character already has. If
-the card carries one, Estate's book is attached alongside it as an auxiliary
-book — the same list the Character Lore panel shows.
+The single chat-lorebook slot is reserved for MemoryBooks and other chat lore.
+Old `chat` attachment settings now use the character's auxiliary list too.
+For books attached by older versions, add them to Character Lore manually and
+select your memory book as the chat lorebook again.
 
 ## Settings
 
@@ -137,8 +138,7 @@ Everything else lives in the dialog and is remembered between runs.
 | Entry creation | `createWorldInfoEntry` — so the entry schema is never hand-rolled |
 | Saving | `saveWorldInfo(name, data, true)` |
 | Creation | `createNewWorldInfo` + `updateWorldInfoList` |
-| Chat binding | `chat_metadata.world_info` + `saveMetadata()` |
-| Card binding | `writeExtensionField(id, 'world', name)`, or `world_info.charLore` when the card already has a book |
+| Card binding | `world_info.charLore` (auxiliary books) |
 | Persona binding | `power_user.persona_description_lorebook` |
 | Generation | `generateRaw()` / `ConnectionManagerRequestService.sendRequest()` |
 | Cancellation | `AbortController` + `stopGeneration()` |
